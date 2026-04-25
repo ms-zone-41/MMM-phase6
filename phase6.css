@@ -1,0 +1,48 @@
+/* MMM-phase6 styles */
+
+.mmm-phase6 {
+  line-height: 1.25;
+}
+
+.mmm-phase6-title {
+  margin-bottom: 6px;
+}
+
+.mmm-phase6 table {
+  border-collapse: collapse;
+}
+
+.mmm-phase6 th {
+  text-align: left;
+  padding: 0 10px 4px 0;
+  font-weight: normal;
+}
+
+.mmm-phase6 td {
+  padding: 0 10px 4px 0;
+  vertical-align: top;
+}
+
+/* Numeric columns: right-align */
+.mmm-phase6 th.mmm-phase6-col-due,
+.mmm-phase6 th.mmm-phase6-col-streak,
+.mmm-phase6 td.mmm-phase6-due,
+.mmm-phase6 td.mmm-phase6-streak {
+  text-align: right;
+}
+
+.mmm-phase6-name {
+  font-weight: normal;
+}
+
+.mmm-phase6-name-bold {
+  font-weight: bold;
+}
+
+.mmm-phase6-license {
+  margin-top: 1px;
+}
+
+.mmm-phase6-fetched {
+  margin-top: 4px;
+}

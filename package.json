@@ -1,0 +1,32 @@
+{
+  "name": "mmm-phase6",
+  "version": "1.0.0",
+  "description": "MagicMirror² module showing phase6 vocabulary learning stats (last learned, due vocab, streak)",
+  "main": "node_helper.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ms-zone-41/MMM-phase6.git"
+  },
+  "author": "MS",
+  "homepage": "https://github.com/ms-zone-41/MMM-phase6#readme",
+  "bugs": {
+    "url": "https://github.com/ms-zone-41/MMM-phase6/issues"
+  },
+  "keywords": [
+    "magicmirror",
+    "magicmirror-module",
+    "phase6",
+    "vocabulary",
+    "learning",
+    "kids"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "fetch-cookie": "^3.0.0",
+    "tough-cookie": "^5.0.0"
+  }
+}
