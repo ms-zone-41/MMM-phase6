@@ -64,12 +64,15 @@ function parseProfiles(html) {
 		if (due === null || streak === null) {
 			return [];
 		}
+		// The date in the local time of the mirror, e.g. "2026-10-10T15:25", or
+		// another text as it is
+		const last = value("Zuletzt gelernt") || null;
+		const date = (/^(\d{2})\.(\d{2})\.(\d{4})(?: (\d{2}):(\d{2}))?$/).exec(last ?? "");
 		return [{
 			// The text of the <b> up to its first tag, without the subscription
 			name: textOf(/<b\b[^>]*>([^<]*)/.exec(part)?.[1] ?? ""),
 			child: panel[1].split(/\s+/).includes("child"),
-			license: textOf(/class="user-premium-label[^"]*"[^>]*>([^<]*)</.exec(part)?.[1] ?? ""),
-			lastLearned: value("Zuletzt gelernt") || null,
+			lastLearned: date ? `${date[3]}-${date[2]}-${date[1]}T${date[4] ?? "00"}:${date[5] ?? "00"}` : last,
 			due,
 			streak
 		}];
@@ -123,7 +126,7 @@ function selectProfiles(profiles, options) {
 	return {
 		shown: rows.filter(([, profile]) => profile).map(([name, profile]) => {
 			const adjustment = Number(adjustments.find(([key]) => matches(profile.name, key))?.[1]) || 0;
-			return { name, license: profile.license, lastLearned: profile.lastLearned, due: Math.max(0, profile.due + adjustment), streak: profile.streak };
+			return { name, lastLearned: profile.lastLearned, due: Math.max(0, profile.due + adjustment), streak: profile.streak };
 		}),
 		unknown: [...rows.filter(([, profile]) => !profile).map(([name]) => name), ...adjustments.map(([key]) => key).filter((key) => !profiles.some((profile) => matches(profile.name, key)))]
 	};
@@ -181,7 +184,6 @@ module.exports = NodeHelper.create({
 		// Nothing to send until the first update has finished
 		this.state = null;
 		this.profiles = null;
-		this.fetchedAt = null;
 		// An updateInterval in seconds or in minutes would load phase6 again and
 		// again
 		const interval = Number(this.config.updateInterval) || DEFAULTS.updateInterval;
@@ -235,7 +237,6 @@ module.exports = NodeHelper.create({
 			const profiles = await this.fetchProfiles();
 			const { shown, unknown } = selectProfiles(profiles, this.config);
 			this.profiles = shown;
-			this.fetchedAt = new Date().toISOString();
 			if (unknown.length > 0) {
 				const names = profiles.map((profile) => firstName(profile.name)).join(", ");
 				error = problem("UNKNOWN_PROFILE", { name: unknown.join(", "), names }, `phase6 has no profile ${unknown.join(", ")}, only ${names}`);
@@ -271,7 +272,7 @@ module.exports = NodeHelper.create({
 		} else if (!error && this.state?.error) {
 			Log.info("phase6 works again");
 		}
-		this.state = { profiles: this.profiles, fetchedAt: this.fetchedAt, error: reported };
+		this.state = { profiles: this.profiles, error: reported };
 		this.sendSocketNotification("PROFILES", this.state);
 	},
 

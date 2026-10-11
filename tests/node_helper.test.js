@@ -268,7 +268,7 @@ test("reports a missing username or password without asking phase6", async () =>
 	for (const [config, name] of [[{ username: "parent@example.com" }, "password"], [{ password: "secret" }, "username"], [{ username: " ", password: "secret" }, "username"]]) {
 		const { site, timers, notifications, logs } = createHelper({ config });
 		await settle();
-		assert.deepEqual(last(notifications), { profiles: null, fetchedAt: null, error: { code: "NO_CREDENTIALS", name, file: "config/config.js" } });
+		assert.deepEqual(last(notifications), { profiles: null, error: { code: "NO_CREDENTIALS", name, file: "config/config.js" } });
 		assert.deepEqual(site.requests, []);
 		assert.equal(timers.size, 0);
 		assert.deepEqual(logs, [`error: The ${name} is missing in config/config.js. Add it, then restart MagicMirror². See the README.`]);
@@ -297,7 +297,7 @@ test("reports a login that phase6 rejects with a page of its own, and does not t
 test("reports a login that phase6 rejects, and does not try again", async () => {
 	const { site, timers, notifications, logs } = createHelper({ config: { ...CONFIG, password: "Hund123" } });
 	await settle();
-	assert.deepEqual(last(notifications), { profiles: null, fetchedAt: null, error: { code: "LOGIN_FAILED" } });
+	assert.deepEqual(last(notifications), { profiles: null, error: { code: "LOGIN_FAILED" } });
 	assert.equal(site.requests.filter(({ method }) => method === "POST").length, 1);
 	assert.equal(timers.size, 0);
 	assert.equal(logs.length, 1);
@@ -336,10 +336,10 @@ test("keeps the profiles while phase6 is not reachable, and tries again in a min
 	const site = fakePhase6();
 	const { timers, notifications } = createHelper({ site });
 	await settle();
-	const { profiles, fetchedAt } = last(notifications);
+	const { profiles } = last(notifications);
 	site.fail(() => new Response("", { status: 502 }));
 	await updateAgain(timers);
-	assert.deepEqual(last(notifications), { profiles, fetchedAt, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
+	assert.deepEqual(last(notifications), { profiles, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
 	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
 	site.fail(null);
 	await updateAgain(timers);
@@ -431,8 +431,8 @@ test("logs a problem once, and again when it changes, and when phase6 works agai
 
 test("shows the children by their first name", async () => {
 	assert.deepEqual((await sent({})).profiles, [
-		{ name: "Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", due: 29, streak: 28 },
-		{ name: "Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", due: 50, streak: 0 }
+		{ name: "Emma", lastLearned: "2026-10-10T15:25", due: 29, streak: 28 },
+		{ name: "Noah", lastLearned: "2026-10-09T07:09", due: 50, streak: 0 }
 	]);
 	assert.deepEqual((await sent({}, OVERVIEW.replace("Muster Emma", "Muster Anna Lena").replace("Muster Noah", "Noah"))).profiles.map(({ name }) => name), ["Anna Lena", "Noah"]);
 });
@@ -467,10 +467,15 @@ test("sends only what the module shows, without surnames", async () => {
 
 test("reads the profiles of the family overview", () => {
 	assert.deepEqual(parse(OVERVIEW), [
-		{ name: "Muster Lena", child: false, license: "PLUS inaktiv", lastLearned: null, due: 0, streak: 0 },
-		{ name: "Muster Emma", child: true, license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", due: 29, streak: 28 },
-		{ name: "Muster Noah", child: true, license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", due: 50, streak: 0 }
+		{ name: "Muster Lena", child: false, lastLearned: null, due: 0, streak: 0 },
+		{ name: "Muster Emma", child: true, lastLearned: "2026-10-10T15:25", due: 29, streak: 28 },
+		{ name: "Muster Noah", child: true, lastLearned: "2026-10-09T07:09", due: 50, streak: 0 }
 	]);
+});
+
+test("reads a date without a time, and passes another text on as it is", () => {
+	assert.equal(parse(OVERVIEW.replace("10.10.2026 15:25", "10.10.2026"))[1].lastLearned, "2026-10-10T00:00");
+	assert.equal(parse(OVERVIEW.replace("10.10.2026 15:25", "Heute, 15:25"))[1].lastLearned, "Heute, 15:25");
 });
 
 test("reads names with entities", () => {

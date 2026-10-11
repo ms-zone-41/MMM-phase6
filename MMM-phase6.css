@@ -1,0 +1,50 @@
+.MMM-phase6 .p6-profiles {
+  border-collapse: collapse;
+}
+
+.MMM-phase6 .p6-profiles th,
+.MMM-phase6 .p6-profiles td {
+  padding: 0 0 0.2em 1em;
+  text-align: left;
+}
+
+.MMM-phase6 .p6-profiles .p6-name {
+  padding-left: 0;
+}
+
+.MMM-phase6 .p6-profiles .p6-due,
+.MMM-phase6 .p6-profiles .p6-streak {
+  text-align: right;
+}
+
+/* The headers of the columns, like the header of a module */
+.MMM-phase6 .p6-profiles th {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xsmall);
+  font-weight: normal;
+  text-transform: uppercase;
+}
+
+/* The names and the due vocabulary, bright */
+.MMM-phase6 .p6-profiles td.p6-name,
+.MMM-phase6 .p6-profiles td.p6-due {
+  color: var(--color-text-bright);
+}
+
+/* A name, bold while vocabulary is due */
+.MMM-phase6 .p6-has-due .p6-name {
+  font-weight: bold;
+}
+
+.MMM-phase6 .p6-warning {
+  margin-bottom: 0.5em;
+}
+
+.MMM-phase6 .p6-warning i {
+  margin-right: 0.3em;
+}
+
+/* The profiles of the last update that worked, while a problem lasts */
+.MMM-phase6 .p6-stale {
+  opacity: 0.5;
+}

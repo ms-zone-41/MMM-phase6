@@ -2,7 +2,6 @@
 	"LAST_LEARNED": "Last learned",
 	"DUE": "Due",
 	"STREAK": "Streak",
-	"UPDATED": "Updated: {time}",
 	"NO_CREDENTIALS": "{name} is missing in {file}",
 	"LOGIN_FAILED": "phase6 rejected the login: check username and password, then restart MagicMirror²",
 	"NOT_REACHABLE": "phase6 is not reachable ({detail})",
