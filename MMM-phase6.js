@@ -214,7 +214,7 @@ Module.register("MMM-phase6", {
       try {
         const d = new Date(payload.fetchedAt);
         ft.textContent = "Updated: " + d.toLocaleString(this.config.locale || "de-DE");
-      } catch (e) {
+      } catch {
         ft.textContent = "Updated: " + payload.fetchedAt;
       }
       wrapper.appendChild(ft);
@@ -254,7 +254,7 @@ Module.register("MMM-phase6", {
         });
         // Some locales insert a comma between date and time.
         return formatted.replace(",", "");
-      } catch (e) {
+      } catch {
         // ignore and fall through
       }
     }

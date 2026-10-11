@@ -24,9 +24,18 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "scripts": {
+    "lint": "eslint",
+    "test": "node --test"
+  },
   "dependencies": {
     "cheerio": "^1.0.0",
     "fetch-cookie": "^3.0.0",
     "tough-cookie": "^5.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0"
   }
 }

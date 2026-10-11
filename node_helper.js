@@ -18,7 +18,7 @@ let fetchCookie;
 try {
   const fc = require("fetch-cookie");
   fetchCookie = fc.default || fc;
-} catch (e) {
+} catch {
   Log.warn("MMM-phase6: 'fetch-cookie' not found. Session cookies will not persist across requests. Run 'npm install' inside the module directory.");
   fetchCookie = null;
 }
@@ -38,7 +38,7 @@ function normalizeWhitespace(str) {
 function safeUrl(baseUrl, pathOrUrl) {
   try {
     return new URL(pathOrUrl, baseUrl).toString();
-  } catch (e) {
+  } catch {
     return String(pathOrUrl || "");
   }
 }
@@ -423,7 +423,7 @@ module.exports = NodeHelper.create({
       // tough-cookie can parse "key=value" when given a currentUrl
       try {
         await this.jar.setCookie(c, baseUrl);
-      } catch (e) {
+      } catch {
         // ignore malformed cookies
       }
     }
