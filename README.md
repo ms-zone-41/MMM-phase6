@@ -24,7 +24,7 @@ cd ~/MagicMirror/modules/MMM-phase6
 git pull
 ```
 
-Then restart MagicMirror².
+Then restart MagicMirror². Version 2 requires MagicMirror² 2.38.0 or newer and changes the configuration, see the [changelog](CHANGELOG.md).
 
 ## Configuration
 
