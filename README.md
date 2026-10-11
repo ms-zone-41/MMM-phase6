@@ -1,168 +1,91 @@
 # MMM-phase6
 
-> **100% vibe coded** — this module was fully created through AI-assisted development.
+A [MagicMirror²](https://magicmirror.builders) module that shows how your children are doing on [phase6](https://www.phase-6.de): when they last learned, how many words are due, and their streak, the days in a row they learned.
 
-A [MagicMirror²](https://magicmirror.builders/) module that displays [phase6](https://www.phase-6.de/) vocabulary learning statistics for your family profiles.
+![Emma, Noah and Mia with the day they last learned, their due words and their streak](screenshot.png)
 
-![Screenshot](./screenshot.png)
-
-**Shown per profile:**
-- Last learned date
-- Due vocabulary count
-- Current learning streak (days in a row)
-
-> **Note:** This is an *unofficial* community module. It uses web scraping and may
-> break if phase6 changes their website layout or login flow.
+The module logs in to phase6 with your login and reads the page Meine Familie › Übersicht. A name is bold while words are due. The module is not from phase6 and may stop working when phase6 changes its website. Use it at your own risk, see the [terms of phase6](https://www.phase-6.de/agb.html).
 
 ## Installation
 
-```bash
+The module requires MagicMirror² 2.38.0 or newer. Clone it into the `modules` directory of MagicMirror²:
+
+```shell
 cd ~/MagicMirror/modules
-git clone https://github.com/ms-zone-41/MMM-phase6.git MMM-phase6
-cd MMM-phase6
-npm install
+git clone https://github.com/ms-zone-41/MMM-phase6
 ```
 
-**Requirements:** Node.js 18 or later (for native `fetch` support).
+The module has no dependencies, so there is nothing to install with npm. Add it to your configuration, see below, and restart MagicMirror².
+
+## Update
+
+```shell
+cd ~/MagicMirror/modules/MMM-phase6
+git pull
+```
+
+Then restart MagicMirror².
 
 ## Configuration
 
-Add the following to the `modules` array in your `config/config.js`:
+The module needs the login of the parent on phase6, the one that shows your children under Meine Familie. MagicMirror² sends `config.js` to every browser that shows the mirror, so put the login into `config/config.env`. Keep `SECRET_` at the start of the names: MagicMirror² hides only those from the browsers.
+
+```shell
+SECRET_PHASE6_USERNAME="parent@example.com"
+SECRET_PHASE6_PASSWORD="your password"
+```
+
+In the password, write `$$` for each `$`. A password with `"` or `\` does not work there: change it on phase6. Then add the module to the `modules` array in `config/config.js`:
 
 ```js
-{
-  module: "MMM-phase6",
-  position: "top_right",
-  config: {
-    username: "your-phase6-email",
-    password: "your-phase6-password",
-  }
-}
+	{
+		module: "MMM-phase6",
+		position: "top_left",
+		header: "phase6",
+		config: {
+			username: "${SECRET_PHASE6_USERNAME}",
+			password: "${SECRET_PHASE6_PASSWORD}"
+		}
+	},
 ```
 
-> **Security tip:** Instead of putting credentials in `config.js`, use
-> environment variables `PHASE6_USER` and `PHASE6_PASS`.
+### Options
 
-### Configuration Options
+| Option | Description | Default |
+| --- | --- | --- |
+| `username` | The e-mail address of the login. | |
+| `password` | The password of the login. | |
+| `profiles` | The profiles to show, in this order, by their first name or their full name on phase6, e.g. `["Emma", "Noah"]`. The module shows each name as you write it. Add your own first name to show your own profile too. | The children, by their first name |
+| `dueAdjustments` | A number to add to the due words of a profile, by its name as in `profiles`, e.g. `{ Emma: -1 }` if phase6 counts a word as due that cannot be learned. | `{}` |
+| `updateInterval` | The time between two updates, in milliseconds, at least one minute. | `10 * 60 * 1000` (10 minutes) |
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `username` | `string` | `""` | phase6 login email/username |
-| `password` | `string` | `""` | phase6 login password |
-| `sessionCookies` | `string[]` | `[]` | Manual browser cookies (see [Troubleshooting](#troubleshooting)) |
-| `updateInterval` | `number` | `600000` | Data refresh interval in ms (default: 10 min) |
-| `requestTimeoutMs` | `number` | `20000` | HTTP request timeout in ms |
-| `overviewPath` | `string` | `"/classic/service/user/parent/"` | Account overview page path |
-| `onlyChildren` | `boolean` | `true` | Only show child profiles |
-| `showAccounts` | `string[]` | `[]` | Filter: only show these names (`[]` = all) |
-| `excludeAccounts` | `string[]` | `[]` | Filter: hide these profile names |
-| `hideSurname` | `boolean` | `true` | Auto-detect and hide family surname |
-| `surnameToHide` | `string` | `""` | Explicit surname to hide (if auto-detect fails) |
-| `showHeader` | `boolean` | `true` | Show the module header |
-| `title` | `string` | `"phase6"` | Module header title |
-| `showLicense` | `boolean` | `false` | Show license label (e.g. "PLUS aktiv") |
-| `showLastLearned` | `boolean` | `true` | Show "Last learned" column |
-| `lastLearnedShowYear` | `boolean` | `false` | Include the year in the date |
-| `showDueVocab` | `boolean` | `true` | Show "Due vocab" column |
-| `showStreak` | `boolean` | `true` | Show "Streak" column |
-| `showFetchedAt` | `boolean` | `false` | Show "Updated: ..." timestamp below table |
-| `locale` | `string` | `"de-DE"` | Locale for date formatting |
-| `dueAdjustments` | `object` | `{}` | Per-account adjustment to the **Due** count, e.g. `{ "Emma": -1 }`. Useful to compensate for items that phase6 still counts as due even though they are already complete. The adjustment is added to the scraped value and clamped to `0`. Lookup is case-insensitive and works on both display name and full name. |
+To hide a column, add a rule to `config/custom.css`, e.g. `.MMM-phase6 .p6-streak { display: none; }` for the streak. The other columns are `p6-last` and `p6-due`.
 
-### Bold profile names
+## Messages
 
-Profiles with `Due > 0` (after applying `dueAdjustments`) are rendered **bold**
-to signal outstanding vocabulary. Profiles with no due items are rendered in
-normal weight.
+The module shows a message above the profiles when something is wrong, and the log of MagicMirror² says more. While a message shows, the profiles of the last update that worked stay, dimmed. After a change of the configuration, restart MagicMirror².
 
-### Full Example
+| Message | What to do |
+| --- | --- |
+| … is missing in … | Add the login, see [Configuration](#configuration). |
+| phase6 rejected the login | Check the login at [phase-6.de](https://www.phase-6.de) and correct it. Until MagicMirror² restarts, the module does not try again, so that phase6 does not lock the account. |
+| phase6 is not reachable | Nothing: the module tries again every minute. If the message stays, check the internet connection of the mirror. |
+| phase6 shows no family members | Use the login of the parent, see [Configuration](#configuration). If you do, phase6 may have changed its website: [update](#update) the module, or [report it](https://github.com/ms-zone-41/MMM-phase6/issues). |
+| phase6 has no profile … | Correct the name in `profiles` or `dueAdjustments`. The message lists the profiles that phase6 has. |
+| Check logs for more details. | [Report it](https://github.com/ms-zone-41/MMM-phase6/issues), with the lines of MMM-phase6 in the log. |
 
-```js
-{
-  module: "MMM-phase6",
-  position: "top_right",
-  header: "phase6",
-  config: {
-    username: "parent@example.com",
-    password: "secret",
-    updateInterval: 15 * 60 * 1000,
-    onlyChildren: true,
-    hideSurname: true,
-    showLicense: false,
-    lastLearnedShowYear: false,
-    showFetchedAt: false,
-    // Optional: subtract 1 from the displayed Due count for these profiles
-    dueAdjustments: { "Emma": -1, "Luca": -1 },
-  }
-}
+## Development
+
+Run the tests and [ESLint](https://eslint.org) in the module directory:
+
+```shell
+npm install
+node --run test
+node --run lint
 ```
 
-## Troubleshooting
-
-### Login fails
-
-If the login form is loaded dynamically via JavaScript (or phase6 requires
-additional SSO/verification), the built-in scraper may not work. In that case:
-
-**Option A — Session Cookies (easiest):**
-
-1. Log in to phase6 in your browser.
-2. Open DevTools → Application → Cookies.
-3. Copy the relevant cookies and add them to your config:
-
-```js
-sessionCookies: [
-  "JSESSIONID=abc123...",
-  "other_cookie=xyz..."
-]
-```
-
-These may expire and need periodic renewal.
-
-**Option B — Environment Variables:**
-
-```bash
-export PHASE6_USER="your-email"
-export PHASE6_PASS="your-password"
-```
-
-### Debugging
-
-1. Open the phase6 Kundenservice page in your browser.
-2. Open DevTools (F12) → Network tab.
-3. Log in and watch which requests deliver the profile data.
-4. If phase6 exposes a JSON API, consider updating `node_helper.js`
-   to use that (more stable than HTML scraping).
-
-Check MagicMirror logs for error messages:
-
-```bash
-# If using systemd:
-journalctl -u magicmirror -f | grep -i phase6
-
-# If using pm2:
-pm2 logs --lines 50 | grep -i phase6
-```
-
-## How It Works
-
-The module's `node_helper.js` runs server-side and:
-
-1. Logs in to the phase6 website using your credentials.
-2. Navigates to the family overview page (`/classic/service/user/parent/`).
-3. Parses the HTML to extract profile names, last-learned dates,
-   due vocabulary counts, and streak information.
-4. Sends the data to the frontend module for display.
-
-Session cookies are managed automatically via `fetch-cookie` + `tough-cookie`.
-
-## Disclaimer
-
-- This module runs locally on your MagicMirror and accesses your own account.
-- Please review [phase6's terms of service](https://www.phase-6.de/) before
-  using automated scraping.
-- No data is sent to any third party.
+The tests read [tests/fixtures/parent.html](tests/fixtures/parent.html), a copy of the page Meine Familie › Übersicht with invented names. When phase6 changes the page, replace it with the new page, and give it the invented names, e-mail addresses, IDs and numbers of the old one, which the tests expect.
 
 ## License
 
-[MIT](LICENSE)
+MIT, see [LICENSE](LICENSE). 100% vibe coded: the module was created entirely with AI-assisted development.
