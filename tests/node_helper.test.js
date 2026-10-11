@@ -27,12 +27,8 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		fetch: (...args) => site.fetch(...args),
 		URL,
 		URLSearchParams,
-		AbortController,
+		AbortSignal,
 		setTimeout: (callback, delay) => {
-			// The short waits within an update pass at once
-			if (delay < 1000) {
-				return setImmediate(callback);
-			}
 			const timer = { callback, delay };
 			timers.add(timer);
 			return timer;
@@ -86,6 +82,121 @@ test("asks only www.phase-6.de", async () => {
 	await settle();
 	assert.ok(site.requests.length > 0);
 	assert.deepEqual(new Set(site.requests.map(({ host }) => host)), new Set(["www.phase-6.de"]));
+});
+
+test("logs in with the form of the login page and follows the redirects", async () => {
+	const { site } = createHelper();
+	await settle();
+	assert.deepEqual(site.requests.map(({ method, path }) => `${method} ${path}`), [
+		"GET /classic/service/user/parent/",
+		"GET /classic/service/user/",
+		"GET /classic/service/user/login.html",
+		"POST /session/login-web",
+		"GET /classic/service/user/login-redirect-on-success.jsp",
+		"GET /classic/service/user/",
+		"GET /classic/service/user/parent/?tmp=42"
+	]);
+	const [login] = site.requests.filter(({ method }) => method === "POST");
+	assert.deepEqual(Object.keys(login.form), ["josso_cmd", "josso_back_to", "josso_on_error", "josso_username", "josso_password"]);
+	assert.equal(login.form.josso_back_to, "https://www.phase-6.de/classic/service/user/login-redirect-on-success.jsp");
+	assert.ok(site.requests.every(({ redirect, signal }) => redirect === "manual" && signal));
+});
+
+test("keeps the cookies of the session across the redirects", async () => {
+	const { site } = createHelper();
+	await settle();
+	const [login] = site.requests.filter(({ method }) => method === "POST");
+	assert.deepEqual(login.cookies, { JSESSIONID: "J1", TPU: "T1" });
+	assert.ok(site.requests.slice(4).every(({ cookies }) => cookies.JOSSO_SESSIONID === "S1"));
+});
+
+test("asks phase6 once per update while the session lasts", async () => {
+	const { site, timers, notifications } = createHelper();
+	await settle();
+	const requests = site.requests.length;
+	await updateAgain(timers);
+	assert.deepEqual(site.requests.slice(requests).map(({ method, path }) => `${method} ${path}`), ["GET /classic/service/user/parent/"]);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+});
+
+test("logs in again when the session has expired", async () => {
+	const { site, timers, notifications } = createHelper();
+	await settle();
+	site.expire();
+	const requests = site.requests.length;
+	await updateAgain(timers);
+	assert.equal(site.requests.slice(requests).filter(({ method }) => method === "POST").length, 1);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+});
+
+test("loads the family overview after a login that lands on another page", async () => {
+	const site = fakePhase6();
+	site.fail((url) => {
+		const { pathname } = new URL(url);
+		if (pathname === "/classic/service/user/login-redirect-on-success.jsp") {
+			return new Response(null, { status: 302, headers: { location: "/lernen/" } });
+		}
+		return pathname === "/lernen/" ? new Response("<html><body>Lernen</body></html>") : null;
+	});
+	const { notifications } = createHelper({ site });
+	await settle();
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+});
+
+test("reports a login that phase6 rejects", async () => {
+	const { site, notifications } = createHelper({ config: { ...CONFIG, password: "wrong" } });
+	await settle();
+	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "phase6 rejected the username or the password" });
+	assert.equal(site.requests.at(-1).path, "/classic/service/user/login.html?ErrorCode=user.login.wrong&josso_back_to=https%3A%2F%2Fwww.phase-6.de%2Fclassic%2Fservice%2Fuser%2F");
+});
+
+test("forgets the cookies that phase6 deletes", async () => {
+	const site = fakePhase6();
+	const { timers } = createHelper({ site });
+	await settle();
+	site.fail(() => new Response("", { status: 503, headers: { "set-cookie": "JOSSO_SESSIONID=; Max-Age=0; Domain=phase-6.de; Path=/" } }));
+	await updateAgain(timers);
+	site.fail(null);
+	const requests = site.requests.length;
+	await updateAgain(timers);
+	assert.equal(site.requests[requests].cookies.JOSSO_SESSIONID, undefined);
+	assert.equal(site.requests.slice(requests).filter(({ method }) => method === "POST").length, 1);
+});
+
+test("reports a problem of the connection, a timeout and an HTTP error", async () => {
+	const breaking = (error) => () => new Response(new ReadableStream({
+		pull(controller) {
+			controller.error(error);
+		}
+	}));
+	const problems = [
+		[() => {
+			throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND www.phase-6.de"), { code: "ENOTFOUND" }) });
+		}, "phase6 cannot be reached: ENOTFOUND"],
+		[() => {
+			throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+		}, "phase6 did not answer within 30 seconds"],
+		[() => new Response("Wartungsarbeiten", { status: 503 }), "phase6 answered with HTTP 503"],
+		// While phase6 sends a page, too
+		[breaking(new DOMException("The operation was aborted due to timeout", "TimeoutError")), "phase6 did not answer within 30 seconds"],
+		[breaking(Object.assign(new TypeError("terminated"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) })), "phase6 cannot be reached: UND_ERR_SOCKET"]
+	];
+	for (const [failure, error] of problems) {
+		const site = fakePhase6();
+		site.fail(failure);
+		const { notifications } = createHelper({ site });
+		await settle();
+		assert.deepEqual(notifications.at(-1).payload, { ok: false, error });
+	}
+});
+
+test("follows no redirect to another website, so cookies go only to phase6", async () => {
+	const site = fakePhase6();
+	site.fail((url) => (new URL(url).pathname === "/classic/service/user/" ? new Response(null, { status: 302, headers: { location: "https://example.com/wartung" } }) : null));
+	const { notifications } = createHelper({ site });
+	await settle();
+	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "phase6 redirected to https://example.com" });
+	assert.ok(site.requests.every(({ host }) => host === "www.phase-6.de"));
 });
 
 test("takes no options from socket notifications", async () => {

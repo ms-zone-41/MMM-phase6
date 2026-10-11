@@ -9,23 +9,7 @@
  * @license MIT
  */
 const NodeHelper = require("node_helper");
-const Log = require("logger");
-const tough = require("tough-cookie");
 const cheerio = require("cheerio");
-
-// fetch-cookie wraps the native fetch (Node 18+) with a cookie jar
-let fetchCookie;
-try {
-	const fc = require("fetch-cookie");
-	fetchCookie = fc.default || fc;
-} catch {
-	Log.warn("MMM-phase6: 'fetch-cookie' not found. Session cookies will not persist across requests. Run 'npm install' inside the module directory.");
-	fetchCookie = null;
-}
-
-function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function normalizeWhitespace(str) {
 	return (str || "")
@@ -33,14 +17,6 @@ function normalizeWhitespace(str) {
 		.replace(/[ \t]+/g, " ")
 		.replace(/\s*\n\s*/g, "\n")
 		.trim();
-}
-
-function safeUrl(baseUrl, pathOrUrl) {
-	try {
-		return new URL(pathOrUrl, baseUrl).toString();
-	} catch {
-		return String(pathOrUrl || "");
-	}
 }
 
 function pickFirstNonEmpty(arr) {
@@ -365,7 +341,10 @@ function extractAccountsFromHtml(html, config = {}) {
 const PHASE6 = "https://www.phase-6.de";
 // The family overview, with the profiles of the parent and the children
 const OVERVIEW = `${PHASE6}/classic/service/user/parent/`;
-const LOGIN_PAGE = `${PHASE6}/classic/service/user/login.html`;
+// Where phase6 sends a browser without a session, and a rejected login
+const LOGIN_PAGE = "/classic/service/user/login.html";
+// How long phase6 may take to answer a request, in milliseconds
+const TIMEOUT = 30 * 1000;
 
 // The options of the node helper and their defaults. It reads them from
 // config.js only: any device that the ipWhitelist of MagicMirror² lets in can
@@ -373,9 +352,7 @@ const LOGIN_PAGE = `${PHASE6}/classic/service/user/login.html`;
 const DEFAULTS = {
 	username: "",
 	password: "",
-	sessionCookies: [],
 	updateInterval: 10 * 60 * 1000,
-	requestTimeoutMs: 20000,
 	onlyChildren: true,
 	showAccounts: [],
 	excludeAccounts: [],
@@ -389,8 +366,8 @@ module.exports = NodeHelper.create({
 
 	start() {
 		this.config = { ...DEFAULTS, ...this.getServerModuleConfig() };
-		this.jar = new tough.CookieJar();
-		this.fetch = fetchCookie ? fetchCookie(fetch, this.jar) : fetch;
+		// The cookies of the session with phase6, by name
+		this.cookies = new Map();
 		// Nothing to send until the first update has finished
 		this.state = null;
 		this.update();
@@ -413,9 +390,7 @@ module.exports = NodeHelper.create({
 	// a time, however many browsers show the mirror.
 	async update() {
 		try {
-			await this.login();
-			const res = await this.fetchWithTimeout(OVERVIEW, { method: "GET", redirect: "follow" });
-			const accounts = extractAccountsFromHtml(await res.text(), this.config);
+			const accounts = extractAccountsFromHtml(await this.fetchOverview(), this.config);
 			this.state = { ok: true, data: { accounts, fetchedAt: new Date().toISOString() } };
 		} catch (err) {
 			this.state = { ok: false, error: err.message };
@@ -429,158 +404,103 @@ module.exports = NodeHelper.create({
 		this.timer = setTimeout(() => this.update(), Number(this.config.updateInterval) || DEFAULTS.updateInterval);
 	},
 
-	async fetchWithTimeout(url, options = {}) {
-		const timeoutMs = Number(this.config.requestTimeoutMs || 20000);
-		const controller = new AbortController();
-		const t = setTimeout(() => controller.abort(), timeoutMs);
-
-		try {
-			const headers = Object.assign(
-				{
-					"User-Agent": "MMM-phase6 (MagicMirror)",
-					"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-					"Accept-Language": "de-DE,de;q=0.9,en;q=0.6"
-				},
-				options.headers || {}
-			);
-
-			const res = await this.fetch(url, Object.assign({}, options, { headers, signal: controller.signal }));
-			return res;
-		} finally {
-			clearTimeout(t);
+	// The HTML of the family overview. Without a session, phase6 redirects to
+	// the login page instead, so log in with its form: phase6 then redirects
+	// to the family overview, or back to the login page.
+	async fetchOverview() {
+		if (!this.config.username || !this.config.password) {
+			throw new Error("No credentials configured. Set username and password in config.js.");
 		}
-	},
-
-	async ensureCookiesFromConfig() {
-		const cookies = Array.isArray(this.config.sessionCookies) ? this.config.sessionCookies : [];
-		if (!cookies.length) return;
-
-		for (const c of cookies) {
-			if (!c || typeof c !== "string") continue;
-			// tough-cookie can parse "key=value" when given a currentUrl
-			try {
-				await this.jar.setCookie(c, PHASE6);
-			} catch {
-				// ignore malformed cookies
+		let page = await this.request(OVERVIEW);
+		if (page.url.pathname === LOGIN_PAGE) {
+			page = await this.login(page);
+			if (page.url.pathname === LOGIN_PAGE) {
+				throw new Error("phase6 rejected the username or the password");
 			}
 		}
+		if (page.url.pathname !== new URL(OVERVIEW).pathname) {
+			page = await this.request(OVERVIEW);
+		}
+		return page.html;
 	},
 
-	async isLoggedIn() {
-		const res = await this.fetchWithTimeout(OVERVIEW, { method: "GET", redirect: "follow" });
-		const finalUrl = (res && res.url) ? res.url : OVERVIEW;
-		const html = await res.text();
-		const $ = cheerio.load(html);
-
-		// Strong signal: redirected to login page
-		if (/\/classic\/service\/user\/login\.html/i.test(finalUrl)) return false;
-
-		// Strong signal: login form present
-		if ($("input[type=\"password\"]").length > 0) return false;
-
-		// Heuristic: typical login page strings
-		const text = normalizeWhitespace($("body").text());
-		if (/Passwort\s+vergessen/i.test(text) && /Registrieren/i.test(text) && /\bLogin\b/i.test(text)) return false;
-
-		return true;
-	},
-
-	async login() {
-		const loginUrl = LOGIN_PAGE;
-
-		const username = String(this.config.username).trim();
-		const password = String(this.config.password).trim();
-
-		if ((!username || !password) && !(Array.isArray(this.config.sessionCookies) && this.config.sessionCookies.length)) {
-			throw new Error(
-				"No credentials configured. Set username and password in config.js."
-			);
+	// Post the form of the login page, with its hidden fields
+	login(page) {
+		const $ = cheerio.load(page.html);
+		const form = $("form").filter((_, el) => $(el).find("input[name=\"josso_password\"]").length > 0).first();
+		if (!form.length) {
+			throw new Error("The login page of phase6 has no login form");
 		}
-
-		// If user supplied cookies, try them first.
-		await this.ensureCookiesFromConfig();
-		if (await this.isLoggedIn()) {
-			return;
-		}
-
-		// Fetch login page to discover the form (action, hidden inputs, field names).
-		const res = await this.fetchWithTimeout(loginUrl, { method: "GET", redirect: "follow" });
-		const html = await res.text();
-		const $ = cheerio.load(html);
-
-		// Pick the form that contains a password field.
-		let form = null;
-		$("form").each((_, el) => {
-			if (form) return;
-			const hasPw = $(el).find("input[type=\"password\"]").length > 0;
-			if (hasPw) form = $(el);
-		});
-
-		if (!form) {
-			throw new Error(
-				"Login form not found (the page may load it via JavaScript). "
-				+ "Try using sessionCookies instead."
-			);
-		}
-
-		const method = (form.attr("method") || "POST").toUpperCase();
-		const actionAttr = form.attr("action") || loginUrl;
-		const actionUrl = safeUrl(PHASE6, actionAttr);
-
-		// Detect field names
-		const pwInput = form.find("input[type=\"password\"]").first();
-		const pwName = pwInput.attr("name") || "password";
-
-		let userInput = form.find("input[type=\"email\"]").first();
-		if (!userInput.length) {
-			userInput = form.find("input[name*=\"mail\" i], input[name*=\"email\" i]").first();
-		}
-		if (!userInput.length) {
-			userInput = form.find("input[type=\"text\"]").first();
-		}
-		const userNameField = userInput.attr("name") || "email";
-
-		// Gather hidden fields (CSRF, etc.)
-		const params = new URLSearchParams();
+		const fields = new URLSearchParams();
 		form.find("input[type=\"hidden\"]").each((_, el) => {
-			const n = $(el).attr("name");
-			const v = $(el).attr("value") || "";
-			if (n) params.set(n, v);
+			fields.set($(el).attr("name"), $(el).attr("value") ?? "");
 		});
+		fields.set("josso_username", String(this.config.username).trim());
+		fields.set("josso_password", String(this.config.password));
+		return this.request(new URL(form.attr("action") ?? page.url, page.url), {
+			method: "POST",
+			body: fields,
+			headers: { Origin: PHASE6, Referer: page.url.href }
+		});
+	},
 
-		params.set(userNameField, username);
-		params.set(pwName, password);
-
-		// Some forms use <button name="..."> or require submit value.
-		const submit = form.find("button[type=\"submit\"], input[type=\"submit\"]").first();
-		if (submit && submit.length) {
-			const sn = submit.attr("name");
-			const sv = submit.attr("value");
-			if (sn && sv != null) params.set(sn, sv);
+	// Fetch a page of phase6 with the cookies of the session, and follow the
+	// redirects: fetch() keeps no cookies, and phase6 sets those of the
+	// session in redirects
+	async request(url, { method = "GET", body, headers } = {}) {
+		let next = new URL(url);
+		for (let redirects = 0; redirects <= 10; redirects++) {
+			if (next.origin !== PHASE6) {
+				throw new Error(`phase6 redirected to ${next.origin}`);
+			}
+			let response;
+			let html;
+			try {
+				response = await fetch(next, {
+					method,
+					body,
+					redirect: "manual",
+					headers: {
+						...headers,
+						"User-Agent": "MMM-phase6 (MagicMirror²)",
+						"Accept-Language": "de",
+						"Cookie": [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ")
+					},
+					signal: AbortSignal.timeout(TIMEOUT)
+				});
+				// The timeout or a lost connection can also end reading the page
+				html = await response.text();
+			} catch (error) {
+				throw new Error(error.name === "TimeoutError" ? `phase6 did not answer within ${TIMEOUT / 1000} seconds` : `phase6 cannot be reached: ${error.cause?.code ?? error.message}`, { cause: error });
+			}
+			this.keepCookies(response);
+			const location = response.headers.get("location");
+			if (response.status >= 300 && response.status < 400 && location) {
+				// Like a browser, follow the redirect with GET
+				next = new URL(location, next);
+				method = "GET";
+				body = undefined;
+				headers = undefined;
+				continue;
+			}
+			if (!response.ok) {
+				throw new Error(`phase6 answered with HTTP ${response.status}`);
+			}
+			return { url: next, html };
 		}
+		throw new Error("phase6 redirected too often");
+	},
 
-		const headers = {
-			"Content-Type": "application/x-www-form-urlencoded",
-			"Origin": PHASE6,
-			"Referer": loginUrl
-		};
-
-		await this.fetchWithTimeout(actionUrl, {
-			method,
-			headers,
-			body: params.toString(),
-			redirect: "follow"
-		});
-
-		// Give the server a moment (some apps set cookies after redirect chains).
-		await sleep(250);
-
-		const ok = await this.isLoggedIn();
-		if (!ok) {
-			throw new Error(
-				"Login failed (or additional verification/SSO required). "
-				+ "Check username/password or try sessionCookies."
-			);
+	// Keep the cookies that a response sets, and forget those it deletes,
+	// which have no value. All of them are for www.phase-6.de and the path /.
+	keepCookies(response) {
+		for (const cookie of response.headers.getSetCookie()) {
+			const [, name, value] = (/^\s*([^=;\s]+)\s*=\s*([^;]*)/).exec(cookie) ?? [];
+			if (value) {
+				this.cookies.set(name, value);
+			} else if (name) {
+				this.cookies.delete(name);
+			}
 		}
 	}
 });

@@ -29,9 +29,7 @@
     "test": "node --test"
   },
   "dependencies": {
-    "cheerio": "^1.0.0",
-    "fetch-cookie": "^3.0.0",
-    "tough-cookie": "^5.0.0"
+    "cheerio": "^1.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
