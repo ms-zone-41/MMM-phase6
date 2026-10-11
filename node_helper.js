@@ -361,33 +361,72 @@ function extractAccountsFromHtml(html, config = {}) {
 	return accounts;
 }
 
+// The website of phase6, which is the only one the node helper asks
+const PHASE6 = "https://www.phase-6.de";
+// The family overview, with the profiles of the parent and the children
+const OVERVIEW = `${PHASE6}/classic/service/user/parent/`;
+const LOGIN_PAGE = `${PHASE6}/classic/service/user/login.html`;
+
+// The options of the node helper and their defaults. It reads them from
+// config.js only: any device that the ipWhitelist of MagicMirror² lets in can
+// send socket notifications to it.
+const DEFAULTS = {
+	username: "",
+	password: "",
+	sessionCookies: [],
+	updateInterval: 10 * 60 * 1000,
+	requestTimeoutMs: 20000,
+	onlyChildren: true,
+	showAccounts: [],
+	excludeAccounts: [],
+	hideSurname: true,
+	surnameToHide: ""
+};
+
 module.exports = NodeHelper.create({
-	start: function () {
-		this.config = null;
+	// getServerModuleConfig() came with MagicMirror² 2.38.0
+	requiresVersion: "2.38.0",
 
+	start() {
+		this.config = { ...DEFAULTS, ...this.getServerModuleConfig() };
 		this.jar = new tough.CookieJar();
-		if (fetchCookie) {
-			this.fetch = fetchCookie(fetch, this.jar);
-		} else {
-			this.fetch = fetch;
-		}
-
-		this.timer = null;
-		this.isFetching = false;
-		this.loggedInVerified = false;
+		this.fetch = fetchCookie ? fetchCookie(fetch, this.jar) : fetch;
+		// Nothing to send until the first update has finished
+		this.state = null;
+		this.update();
 	},
 
-	socketNotificationReceived: function (notification, payload) {
-		if (notification === "PHASE6_CONFIG") {
-			this.config = payload || {};
-			this.loggedInVerified = false;
-			this.scheduleFetch(0);
+	stop() {
+		this.stopped = true;
+		clearTimeout(this.timer);
+	},
+
+	// The module asks for the profiles when it starts. The payload is ignored.
+	socketNotificationReceived(notification) {
+		if (notification === "GET_PROFILES" && this.state) {
+			this.sendSocketNotification("PROFILES", this.state);
 		}
 	},
 
-	scheduleFetch: function (delayMs) {
-		if (this.timer) clearTimeout(this.timer);
-		this.timer = setTimeout(() => this.fetchAndSend(), delayMs);
+	// Read the profiles from phase6, send them to the module, and update again
+	// updateInterval after the update has finished. So there is one update at
+	// a time, however many browsers show the mirror.
+	async update() {
+		try {
+			await this.login();
+			const res = await this.fetchWithTimeout(OVERVIEW, { method: "GET", redirect: "follow" });
+			const accounts = extractAccountsFromHtml(await res.text(), this.config);
+			this.state = { ok: true, data: { accounts, fetchedAt: new Date().toISOString() } };
+		} catch (err) {
+			this.state = { ok: false, error: err.message };
+		}
+		// When MagicMirror² stops during an update, report nothing and do not
+		// update again
+		if (this.stopped) {
+			return;
+		}
+		this.sendSocketNotification("PROFILES", this.state);
+		this.timer = setTimeout(() => this.update(), Number(this.config.updateInterval) || DEFAULTS.updateInterval);
 	},
 
 	async fetchWithTimeout(url, options = {}) {
@@ -416,12 +455,11 @@ module.exports = NodeHelper.create({
 		const cookies = Array.isArray(this.config.sessionCookies) ? this.config.sessionCookies : [];
 		if (!cookies.length) return;
 
-		const baseUrl = this.config.baseUrl || "https://www.phase-6.de";
 		for (const c of cookies) {
 			if (!c || typeof c !== "string") continue;
 			// tough-cookie can parse "key=value" when given a currentUrl
 			try {
-				await this.jar.setCookie(c, baseUrl);
+				await this.jar.setCookie(c, PHASE6);
 			} catch {
 				// ignore malformed cookies
 			}
@@ -429,11 +467,8 @@ module.exports = NodeHelper.create({
 	},
 
 	async isLoggedIn() {
-		const baseUrl = this.config.baseUrl || "https://www.phase-6.de";
-		const overviewUrl = safeUrl(baseUrl, this.config.overviewPath || "/classic/service/user/parent/");
-
-		const res = await this.fetchWithTimeout(overviewUrl, { method: "GET", redirect: "follow" });
-		const finalUrl = (res && res.url) ? res.url : overviewUrl;
+		const res = await this.fetchWithTimeout(OVERVIEW, { method: "GET", redirect: "follow" });
+		const finalUrl = (res && res.url) ? res.url : OVERVIEW;
 		const html = await res.text();
 		const $ = cheerio.load(html);
 
@@ -451,23 +486,20 @@ module.exports = NodeHelper.create({
 	},
 
 	async login() {
-		const baseUrl = this.config.baseUrl || "https://www.phase-6.de";
-		const loginUrl = safeUrl(baseUrl, this.config.loginPath || "/classic/service/user/login.html");
+		const loginUrl = LOGIN_PAGE;
 
-		const username = (this.config.username || process.env.PHASE6_USER || "").trim();
-		const password = (this.config.password || process.env.PHASE6_PASS || "").trim();
+		const username = String(this.config.username).trim();
+		const password = String(this.config.password).trim();
 
 		if ((!username || !password) && !(Array.isArray(this.config.sessionCookies) && this.config.sessionCookies.length)) {
 			throw new Error(
-				"No credentials configured. Set username/password in config.js "
-				+ "or provide PHASE6_USER/PHASE6_PASS environment variables."
+				"No credentials configured. Set username and password in config.js."
 			);
 		}
 
 		// If user supplied cookies, try them first.
 		await this.ensureCookiesFromConfig();
 		if (await this.isLoggedIn()) {
-			this.loggedInVerified = true;
 			return;
 		}
 
@@ -493,7 +525,7 @@ module.exports = NodeHelper.create({
 
 		const method = (form.attr("method") || "POST").toUpperCase();
 		const actionAttr = form.attr("action") || loginUrl;
-		const actionUrl = safeUrl(baseUrl, actionAttr);
+		const actionUrl = safeUrl(PHASE6, actionAttr);
 
 		// Detect field names
 		const pwInput = form.find("input[type=\"password\"]").first();
@@ -529,7 +561,7 @@ module.exports = NodeHelper.create({
 
 		const headers = {
 			"Content-Type": "application/x-www-form-urlencoded",
-			"Origin": baseUrl,
+			"Origin": PHASE6,
 			"Referer": loginUrl
 		};
 
@@ -549,38 +581,6 @@ module.exports = NodeHelper.create({
 				"Login failed (or additional verification/SSO required). "
 				+ "Check username/password or try sessionCookies."
 			);
-		}
-		this.loggedInVerified = true;
-	},
-
-	async fetchAndSend() {
-		if (!this.config || this.isFetching) return;
-		this.isFetching = true;
-
-		const updateInterval = Number(this.config.updateInterval || 10 * 60 * 1000);
-
-		try {
-			await this.login();
-
-			const baseUrl = this.config.baseUrl || "https://www.phase-6.de";
-			const overviewUrl = safeUrl(baseUrl, this.config.overviewPath || "/classic/service/user/parent/");
-
-			const res = await this.fetchWithTimeout(overviewUrl, { method: "GET", redirect: "follow" });
-			const html = await res.text();
-
-			const accounts = extractAccountsFromHtml(html, this.config);
-
-			const data = {
-				accounts,
-				fetchedAt: new Date().toISOString()
-			};
-
-			this.sendSocketNotification("PHASE6_DATA", { ok: true, data });
-		} catch (err) {
-			this.sendSocketNotification("PHASE6_DATA", { ok: false, error: (err && err.message) ? err.message : String(err) });
-		} finally {
-			this.isFetching = false;
-			this.scheduleFetch(updateInterval);
 		}
 	}
 });

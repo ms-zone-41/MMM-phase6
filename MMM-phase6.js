@@ -9,25 +9,9 @@
  * @see https://github.com/ms-zone-41/MMM-phase6
  */
 Module.register("MMM-phase6", {
+	// The options of the display. The node helper reads username, password and
+	// updateInterval from config.js.
 	defaults: {
-		baseUrl: "https://www.phase-6.de",
-		loginPath: "/classic/service/user/login.html",
-		overviewPath: "/classic/service/user/parent/",
-		updateInterval: 10 * 60 * 1000, // 10 minutes
-		requestTimeoutMs: 20_000,
-
-		// Credentials:
-		// IMPORTANT: Do NOT share your credentials in chats. Put them only into your local config.js
-		// or provide them via environment variables PHASE6_USER / PHASE6_PASS.
-		username: "",
-		password: "",
-
-		// Optional: If the site uses an extra cookie/SSO and login scraping fails,
-		// you can provide one or more cookies here (copied from your browser).
-		// Example: ["JSESSIONID=abc123", "some_cookie=xyz"]
-		sessionCookies: [],
-
-		// UI options
 		title: "phase6",
 		showHeader: true,
 		showAccounts: [], // [] = show all; otherwise list of account names to show
@@ -58,6 +42,9 @@ Module.register("MMM-phase6", {
 		dueAdjustments: {}
 	},
 
+	// The node helper reads its options with getServerModuleConfig()
+	requiresVersion: "2.38.0",
+
 	getHeader: function () {
 		// Use MagicMirror's native header rendering (with the standard underline).
 		// Respect a user-provided module header (configured via the MagicMirror "header" field)
@@ -75,7 +62,7 @@ Module.register("MMM-phase6", {
 		this.error = null;
 		this.loaded = false;
 
-		this.sendSocketNotification("PHASE6_CONFIG", this.config);
+		this.sendSocketNotification("GET_PROFILES");
 	},
 
 	getStyles: function () {
@@ -264,7 +251,7 @@ Module.register("MMM-phase6", {
 	},
 
 	socketNotificationReceived: function (notification, payload) {
-		if (notification === "PHASE6_DATA") {
+		if (notification === "PROFILES") {
 			this.loaded = true;
 
 			if (!payload || payload.ok !== true) {
