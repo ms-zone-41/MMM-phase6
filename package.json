@@ -28,9 +28,6 @@
     "lint": "eslint",
     "test": "node --test"
   },
-  "dependencies": {
-    "cheerio": "^1.0.0"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@stylistic/eslint-plugin": "^5.10.0",

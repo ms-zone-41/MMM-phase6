@@ -6,8 +6,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { createRequire } = require("node:module");
-const { fakePhase6 } = require("./fake-phase6.js");
+const { fakePhase6, OVERVIEW, LOGIN_PAGE } = require("./fake-phase6.js");
 
 // The options of the module in config.js
 const CONFIG = { username: "parent@example.com", password: "secret" };
@@ -21,7 +20,7 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		require: (name) => ({
 			node_helper: { create: (definition) => definition },
 			logger: { debug() {}, log() {}, info() {}, warn() {}, error() {} }
-		})[name] ?? createRequire(path.join(__dirname, "../node_helper.js"))(name),
+		})[name],
 		module: {},
 		// The stand-in answers instead of phase6
 		fetch: (...args) => site.fetch(...args),
@@ -67,6 +66,13 @@ function names(notifications) {
 	return notifications.at(-1).payload.data.accounts.map((account) => account.displayName);
 }
 
+// The accounts that the node helper sends for a family overview
+async function accountsOf(overview, config = {}) {
+	const { notifications } = createHelper({ config: { ...CONFIG, ...config }, site: fakePhase6({ overview }) });
+	await settle();
+	return notifications.at(-1).payload.data.accounts;
+}
+
 test("logs in with the options of config.js and sends the profiles of the children", async () => {
 	const { site, notifications } = createHelper();
 	await settle();
@@ -100,6 +106,15 @@ test("logs in with the form of the login page and follows the redirects", async 
 	assert.deepEqual(Object.keys(login.form), ["josso_cmd", "josso_back_to", "josso_on_error", "josso_username", "josso_password"]);
 	assert.equal(login.form.josso_back_to, "https://www.phase-6.de/classic/service/user/login-redirect-on-success.jsp");
 	assert.ok(site.requests.every(({ redirect, signal }) => redirect === "manual" && signal));
+});
+
+test("posts all hidden fields of the login form, also new ones", async () => {
+	const site = fakePhase6({ loginPage: LOGIN_PAGE.replace("<input type=\"text\"", "<input type=\"hidden\" name=\"csrf\" value=\"a&amp;b\"><input type=\"text\"") });
+	createHelper({ site });
+	await settle();
+	const [login] = site.requests.filter(({ method }) => method === "POST");
+	assert.equal(login.form.csrf, "a&b");
+	assert.equal(login.form.josso_cmd, "login");
 });
 
 test("keeps the cookies of the session across the redirects", async () => {
@@ -260,9 +275,44 @@ test("reports a missing username or password", async () => {
 	assert.deepEqual(site.requests, []);
 });
 
+test("reads the profiles of the family overview", async () => {
+	assert.deepEqual(await accountsOf(OVERVIEW, { onlyChildren: false, hideSurname: false }), [
+		{ name: "Muster Lena", displayName: "Muster Lena", license: "PLUS inaktiv", lastLearned: null, dueVocab: 0, streakDays: 0 },
+		{ name: "Muster Emma", displayName: "Muster Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", dueVocab: 29, streakDays: 28 },
+		{ name: "Muster Noah", displayName: "Muster Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", dueVocab: 50, streakDays: 0 }
+	]);
+});
+
+test("reads names with entities", async () => {
+	const [emma] = await accountsOf(OVERVIEW.replace("Muster Emma", "M&uuml;ller-L&#252;denscheidt Emma &amp; Co"), { hideSurname: false });
+	assert.equal(emma.name, "Müller-Lüdenscheidt Emma & Co");
+});
+
+test("reads numbers with dots between thousands", async () => {
+	const [emma] = await accountsOf(OVERVIEW.replace("<span>29</span>", "<span>1.234</span>"));
+	assert.equal(emma.dueVocab, 1234);
+});
+
+test("skips panels without a profile", async () => {
+	const offer = "<div class=\"button row panel offer\"><b>PLUS für die ganze Familie</b><small>Jetzt testen</small></div>";
+	assert.deepEqual((await accountsOf(OVERVIEW.replace("<footer>", `${offer}<footer>`), { onlyChildren: false })).map(({ name }) => name), ["Muster Lena", "Muster Emma", "Muster Noah"]);
+});
+
+test("sends no e-mail addresses of the page to the browsers", async () => {
+	const { notifications } = createHelper();
+	await settle();
+	assert.doesNotMatch(JSON.stringify(notifications), /@/);
+});
+
 test("uses only invented e-mail addresses in the fixtures", () => {
 	for (const file of fs.readdirSync(path.join(__dirname, "fixtures"))) {
 		const addresses = fs.readFileSync(path.join(__dirname, "fixtures", file), "utf8").match(/[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [];
 		assert.deepEqual(addresses.filter((address) => !address.endsWith("@example.com")), [], file);
 	}
+});
+
+test("reports a login page without a login form", async () => {
+	const { notifications } = createHelper({ site: fakePhase6({ loginPage: "<html><body>Wartungsarbeiten</body></html>" }) });
+	await settle();
+	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "The login page of phase6 has no login form" });
 });

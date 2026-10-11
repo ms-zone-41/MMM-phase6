@@ -1,34 +1,92 @@
-/**
- * Node Helper for MMM-phase6
+/* MagicMirror²
+ * Node Helper: MMM-phase6
  *
- * Logs into https://www.phase-6.de/classic/service/user/ and scrapes stats.
+ * Logs in to phase6 and reads the family overview.
  *
- * This is intentionally written defensively because phase6 may change markup.
- * If it breaks, capture your browser Network request(s) and adjust selectors/regex.
- *
- * @license MIT
+ * MIT Licensed.
  */
+
 const NodeHelper = require("node_helper");
-const cheerio = require("cheerio");
 
-function normalizeWhitespace(str) {
-	return (str || "")
-		.replace(/\u00a0/g, " ")
-		.replace(/[ \t]+/g, " ")
-		.replace(/\s*\n\s*/g, "\n")
-		.trim();
+// The named entities that the pages of phase6 may have
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", auml: "ä", ouml: "ö", uuml: "ü", Auml: "Ä", Ouml: "Ö", Uuml: "Ü", szlig: "ß" };
+
+// Text with its entities decoded
+function decode(text) {
+	return text.replace(/&(?:#(\d+)|#x([\da-f]+)|(\w+));/gi, (entity, decimal, hex, name) => {
+		if (name) {
+			return ENTITIES[name] ?? entity;
+		}
+		return String.fromCodePoint(Number.parseInt(decimal ?? hex, decimal ? 10 : 16));
+	});
 }
 
-function pickFirstNonEmpty(arr) {
-	for (const v of arr) {
-		const s = (v || "").trim();
-		if (s) return s;
+// The text of some HTML: without comments and tags, decoded, with single
+// spaces
+function textOf(html) {
+	return decode(html.replace(/<!--[\s\S]*?-->|<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+// The value of an attribute in a tag, decoded
+function attributeOf(tag, name) {
+	const match = new RegExp(`\\s${name}="([^"]*)"`).exec(tag);
+	return match ? decode(match[1]) : null;
+}
+
+// The profiles of the family overview, in its order. Each profile has a
+// panel, a div with the classes button, row and panel, and child for a child:
+//
+//   <div class="button row panel child  premium ">
+//     … <b data-mf-replace-inner="*REMOVED NAME*">Muster Emma
+//         <span class="user-premium-label">PLUS aktiv</span></b>
+//     <small …>emma.muster@example.com</small>
+//     <small>…Zuletzt gelernt: <span>10.10.2026 15:25</span></small>
+//     <small>…Fällige Vokabeln: <span>29</span></small>
+//     <small>…Tage in Folge gelernt: <span>28</span></small>
+//
+// A profile that has never learned shows "Bislang noch nicht gelernt <span>
+// </span>" instead of the date. Panels without a number of due vocabulary,
+// e.g. offers, are not profiles.
+function parseProfiles(html) {
+	const panels = [...html.matchAll(/<div\s+class="([^"]*)"/g)].filter(([, classes]) => ["button", "row", "panel"].every((name) => classes.split(/\s+/).includes(name)));
+	return panels.flatMap((panel, index) => {
+		const part = html.slice(panel.index, panels[index + 1]?.index);
+		// The text in the span after a label
+		const value = (label) => {
+			const match = new RegExp(`${label}:\\s*<span>([^<]*)</span>`).exec(part);
+			return match ? textOf(match[1]) : null;
+		};
+		// A number, also with dots between thousands, e.g. 1.234
+		const number = (text) => (/^\d{1,3}(\.\d{3})*$|^\d+$/.test(text ?? "") ? Number(text.replaceAll(".", "")) : null);
+		const due = number(value("Vokabeln"));
+		const streak = number(value("in Folge gelernt"));
+		if (due === null || streak === null) {
+			return [];
+		}
+		return [{
+			// The text of the <b> up to its first tag, without the subscription
+			name: textOf(/<b\b[^>]*>([^<]*)/.exec(part)?.[1] ?? ""),
+			child: panel[1].split(/\s+/).includes("child"),
+			license: textOf(/class="user-premium-label[^"]*"[^>]*>([^<]*)</.exec(part)?.[1] ?? ""),
+			lastLearned: value("Zuletzt gelernt") || null,
+			due,
+			streak
+		}];
+	});
+}
+
+// The login form of the login page: where to post it, and its hidden fields,
+// e.g. josso_cmd and josso_back_to
+function parseLoginForm(html) {
+	const form = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)].find(([, , inside]) => inside.includes("name=\"josso_password\""));
+	if (!form) {
+		return null;
 	}
-	return "";
-}
-
-function escapeRegExp(str) {
-	return String(str || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const hidden = [...form[2].matchAll(/<input\b[^>]*>/g)].map(([tag]) => tag).filter((tag) => attributeOf(tag, "type") === "hidden");
+	return {
+		action: attributeOf(form[1], "action"),
+		fields: hidden.map((tag) => [attributeOf(tag, "name"), attributeOf(tag, "value") ?? ""])
+	};
 }
 
 function tokenizeName(name) {
@@ -88,9 +146,8 @@ function inferSurnameToken(childNames, parentName) {
 	return "";
 }
 
-function extractAccountsFromHtml(html, config = {}) {
-	const $ = cheerio.load(html);
-
+// The accounts to show, with the names to show
+function selectAccounts(profiles, config) {
 	const includeNames = Array.isArray(config.showAccounts)
 		? config.showAccounts.map((s) => String(s || "").toLowerCase()).filter(Boolean)
 		: [];
@@ -99,241 +156,37 @@ function extractAccountsFromHtml(html, config = {}) {
 		? config.excludeAccounts.map((s) => String(s || "").toLowerCase()).filter(Boolean)
 		: [];
 
-	function normalizeCandidates(nameOrList) {
-		const list = Array.isArray(nameOrList) ? nameOrList : [nameOrList];
-		return list
-			.map((s) => String(s || "").toLowerCase().trim())
-			.filter(Boolean);
-	}
+	const explicitSurname = String(config.surnameToHide || "").trim();
+	const childNames = profiles.filter((p) => p.child).map((p) => p.name);
+	const parentName = (profiles.find((p) => !p.child) || {}).name || "";
 
-	function isExcluded(nameOrList) {
-		const candidates = normalizeCandidates(nameOrList);
-		if (!candidates.length) return false;
-		return candidates.some((c) => excludeNames.includes(c));
-	}
+	// Decide which token(s) to remove from display names.
+	const surnameToken = explicitSurname
+		? explicitSurname
+		: (config.hideSurname === true ? inferSurnameToken(childNames, parentName) : "");
 
-	function isIncluded(nameOrList) {
-		if (!includeNames.length) return true;
-		const candidates = normalizeCandidates(nameOrList);
-		return candidates.some((c) => includeNames.includes(c));
-	}
-
-	function metricSpanText($panel, labelRe) {
-		const $small = $panel
-			.find("small")
-			.filter((_, el) => labelRe.test($(el).text()))
-			.first();
-
-		if (!$small.length) return null;
-
-		// Prefer the inner <span> (phase6 uses it for values)
-		const spanText = normalizeWhitespace($small.find("span").first().text());
-		if (spanText) return spanText;
-
-		// Fallback: strip the label from the full small text
-		const full = normalizeWhitespace($small.text());
-		const cleaned = full.replace(labelRe, "").replace(/^\s*:\s*/, "").trim();
-		return cleaned || null;
-	}
-
-	function extractNameAndLicense($panel) {
-		// Name is typically in the first <b> inside .list-statistics
-		let $b = $panel.find(".list-statistics b").first();
-		if (!$b.length) $b = $panel.find("b").first();
-
-		if (!$b.length) return { fullName: "", license: "" };
-
-		// License label is usually nested inside <span class="user-premium-label">...
-		let license = normalizeWhitespace($b.find(".user-premium-label").first().text());
-		if (!license) license = normalizeWhitespace($panel.find(".user-premium-label").first().text());
-
-		// Clone and remove nested premium/label spans so the remaining text is only the name
-		const $clone = $b.clone();
-		$clone.find(".user-premium-label").remove();
-
-		let fullName = normalizeWhitespace($clone.text());
-
-		// As an extra safety net: strip the license text if it is still present for any reason
-		if (license) {
-			const re = new RegExp(`\\b${escapeRegExp(license)}\\b`, "i");
-			fullName = normalizeWhitespace(fullName.replace(re, " "));
-		}
-
-		// Sometimes the name ends up split across lines (because the label was inline). Keep the first line.
-		const lines = fullName.split("\n").map((l) => l.trim()).filter(Boolean);
-		if (lines.length) fullName = lines[0];
-
-		return { fullName, license };
-	}
-
-	// --- Attempt 0: phase6 family overview (/classic/service/user/parent/)
-	// On that page, each profile is rendered as a panel like:
-	//   <div class="button row panel child premium"> ...
-	// Parent has typically NO "child" class.
-	const panels = $("div.button.row.panel");
 	const accounts = [];
+	for (const p of profiles) {
+		if (config.onlyChildren === true && !p.child) continue;
 
-	if (panels.length) {
-		// First, collect all real profile panels (including parent) so we can infer
-		// a common family name token (optional, for privacy/UI).
-		const rawPanels = [];
+		const displayName = (config.hideSurname === true && surnameToken)
+			? stripTokenFromName(p.name, surnameToken)
+			: p.name;
 
-		panels.each((_, el) => {
-			const $p = $(el);
-			const isChild = $p.hasClass("child");
-
-			const { fullName, license } = extractNameAndLicense($p);
-
-			// Metrics
-			const lastLearnedRaw = metricSpanText($p, /Zuletzt\s+(?:gelernt|geübt)\s*:/i);
-			const dueRaw = metricSpanText($p, /Fällige\s+(?:Vokabeln|Kärtchen)\s*:/i);
-			const streakRaw = metricSpanText($p, /Tage\s+in\s+Folge\s+(?:gelernt|geübt)\s*:/i);
-
-			// Special case: "Bislang noch nicht gelernt" (no date)
-			const fullText = normalizeWhitespace($p.text());
-			const neverLearned = /Bislang\s+noch\s+nicht\s+(?:gelernt|geübt)/i.test(fullText);
-
-			const lastLearned = neverLearned ? null : (lastLearnedRaw || null);
-			const dueVocab = (dueRaw != null && /^\d+$/.test(dueRaw)) ? Number(dueRaw) : null;
-			const streakDays = (streakRaw != null && /^\d+$/.test(streakRaw)) ? Number(streakRaw) : null;
-
-			// Only keep panels that actually contain (at least) one of the relevant metrics.
-			// (Some panels can be upsell blocks etc.)
-			if (dueVocab == null && streakDays == null && lastLearned == null) return;
-
-			rawPanels.push({
-				isChild,
-				fullName: fullName || "Profil",
-				license: license || "",
-				lastLearned,
-				dueVocab,
-				streakDays
-			});
-		});
-
-		if (rawPanels.length) {
-			const explicitSurname = String(config.surnameToHide || "").trim();
-
-			const childNames = rawPanels
-				.filter((p) => p.isChild)
-				.map((p) => p.fullName)
-				.filter(Boolean);
-
-			const parentName = (rawPanels.find((p) => !p.isChild) || {}).fullName || "";
-
-			// Decide which token(s) to remove from display names.
-			const surnameToken = explicitSurname
-				? explicitSurname
-				: (config.hideSurname === true ? inferSurnameToken(childNames, parentName) : "");
-
-			rawPanels.forEach((p) => {
-				if (config.onlyChildren === true && !p.isChild) return;
-
-				const safeName = p.fullName || "Profil";
-				const displayName = (config.hideSurname === true && surnameToken)
-					? stripTokenFromName(safeName, surnameToken)
-					: safeName;
-
-				// Allow filtering by either full name or display name.
-				const nameCandidates = [safeName, displayName];
-				if (!isIncluded(nameCandidates) || isExcluded(nameCandidates)) return;
-
-				accounts.push({
-					name: safeName,
-					displayName: displayName || safeName,
-					license: p.license || null,
-					lastLearned: p.lastLearned,
-					dueVocab: p.dueVocab,
-					streakDays: p.streakDays
-				});
-			});
-
-			if (accounts.length) return accounts;
-		}
-	}
-
-	// --- Attempt 1: generic scan for blocks that contain all three values
-	const bodyText = normalizeWhitespace($("body").text());
-
-	const reLast = /(Zuletzt\s+(?:gelernt|geübt)\s*:?\s*)(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2})/i;
-	const reDue = /(Fällige\s+(?:Vokabeln|Kärtchen)\s*:?\s*)(\d+)/i;
-	const reStreak = /(Tage\s+in\s+Folge\s+(?:gelernt|geübt)\s*:?\s*)(\d+)/i;
-
-	const blocks = [];
-	const seen = new Set();
-
-	const candidates = $("*:contains(\"Zuletzt\")").toArray();
-
-	for (const el of candidates) {
-		const container = $(el).closest("section,article,div,li,tr,td").first();
-		if (!container || !container.length) continue;
-
-		const txt = normalizeWhitespace(container.text());
-		if (!reLast.test(txt) || !reDue.test(txt) || !reStreak.test(txt)) continue;
-
-		const key = container.html();
-		if (seen.has(key)) continue;
-		seen.add(key);
-		blocks.push(container);
-	}
-
-	for (const container of blocks) {
-		const txt = normalizeWhitespace(container.text());
-
-		const last = (txt.match(reLast) || [])[2] || null;
-		const due = (txt.match(reDue) || [])[2] || null;
-		const streak = (txt.match(reStreak) || [])[2] || null;
-
-		const nameCandidates = [];
-		container.find("h1,h2,h3,h4,strong,b").each((_, el) => {
-			// In some variants the premium label is nested in the heading/b tag.
-			// Keep only the first meaningful line.
-			const t = normalizeWhitespace($(el).text());
-			const firstLine = (t.split("\n").map((l) => l.trim()).filter(Boolean)[0] || "");
-			if (firstLine && firstLine.length <= 60) nameCandidates.push(firstLine);
-		});
-
-		let name = pickFirstNonEmpty(nameCandidates);
-
-		if (!name) {
-			const before = txt.split(/Zuletzt\s+(?:gelernt|geübt)/i)[0] || "";
-			const lines = before.split("\n").map((s) => s.trim()).filter(Boolean);
-			name = lines.length ? lines[lines.length - 1] : "";
-			if (name.length > 60) name = "";
-		}
-
-		const safeName = name || "Profil";
-		if (!isIncluded(safeName) || isExcluded(safeName)) continue;
+		// Allow filtering by either full name or display name.
+		const candidates = [p.name, displayName].map((n) => n.toLowerCase());
+		if (includeNames.length && !candidates.some((c) => includeNames.includes(c))) continue;
+		if (candidates.some((c) => excludeNames.includes(c))) continue;
 
 		accounts.push({
-			name: safeName,
-			lastLearned: last,
-			dueVocab: due != null ? Number(due) : null,
-			streakDays: streak != null ? Number(streak) : null
+			name: p.name,
+			displayName,
+			license: p.license || null,
+			lastLearned: p.lastLearned,
+			dueVocab: p.due,
+			streakDays: p.streak
 		});
 	}
-
-	// --- Attempt 2: global regex fallback
-	if (!accounts.length) {
-		const global = new RegExp(
-			/Zuletzt\s+(?:gelernt|geübt)\s*:?\s*(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}).*?Fällige\s+(?:Vokabeln|Kärtchen)\s*:?\s*(\d+).*?Tage\s+in\s+Folge\s+(?:gelernt|geübt)\s*:?\s*(\d+)/gis
-		);
-		let m;
-		let i = 1;
-		while ((m = global.exec(bodyText)) !== null) {
-			const safeName = `Profil ${i++}`;
-			if (!isIncluded(safeName) || isExcluded(safeName)) continue;
-
-			accounts.push({
-				name: safeName,
-				lastLearned: m[1],
-				dueVocab: Number(m[2]),
-				streakDays: Number(m[3])
-			});
-			if (global.lastIndex === m.index) global.lastIndex++;
-		}
-	}
-
 	return accounts;
 }
 
@@ -390,7 +243,7 @@ module.exports = NodeHelper.create({
 	// a time, however many browsers show the mirror.
 	async update() {
 		try {
-			const accounts = extractAccountsFromHtml(await this.fetchOverview(), this.config);
+			const accounts = selectAccounts(parseProfiles(await this.fetchOverview()), this.config);
 			this.state = { ok: true, data: { accounts, fetchedAt: new Date().toISOString() } };
 		} catch (err) {
 			this.state = { ok: false, error: err.message };
@@ -426,18 +279,14 @@ module.exports = NodeHelper.create({
 
 	// Post the form of the login page, with its hidden fields
 	login(page) {
-		const $ = cheerio.load(page.html);
-		const form = $("form").filter((_, el) => $(el).find("input[name=\"josso_password\"]").length > 0).first();
-		if (!form.length) {
+		const form = parseLoginForm(page.html);
+		if (!form) {
 			throw new Error("The login page of phase6 has no login form");
 		}
-		const fields = new URLSearchParams();
-		form.find("input[type=\"hidden\"]").each((_, el) => {
-			fields.set($(el).attr("name"), $(el).attr("value") ?? "");
-		});
+		const fields = new URLSearchParams(form.fields);
 		fields.set("josso_username", String(this.config.username).trim());
 		fields.set("josso_password", String(this.config.password));
-		return this.request(new URL(form.attr("action") ?? page.url, page.url), {
+		return this.request(new URL(form.action || page.url, page.url), {
 			method: "POST",
 			body: fields,
 			headers: { Origin: PHASE6, Referer: page.url.href }
