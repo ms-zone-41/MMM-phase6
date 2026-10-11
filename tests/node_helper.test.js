@@ -44,7 +44,7 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		sendSocketNotification: (notification, payload) => notifications.push({ notification, payload: JSON.parse(JSON.stringify(payload)) })
 	});
 	helper.start();
-	return { helper, site, timers, notifications, logs };
+	return { helper, site, timers, notifications, logs, context };
 }
 
 // Wait until the update has finished: the stand-in answers at once, so a few
@@ -72,14 +72,20 @@ function last(notifications) {
 // that worked
 function names(notifications) {
 	assert.equal(last(notifications).error, null);
-	return last(notifications).accounts.map((account) => account.displayName);
+	return last(notifications).profiles.map((profile) => profile.name);
 }
 
-// The accounts that the node helper sends for a family overview
-async function accountsOf(overview, config = {}) {
+// What the node helper sends with the given options
+async function sent(config, overview = OVERVIEW) {
 	const { notifications } = createHelper({ config: { ...CONFIG, ...config }, site: fakePhase6({ overview }) });
 	await settle();
-	return last(notifications).accounts;
+	return last(notifications);
+}
+
+// The profiles that the node helper reads from a family overview
+function parse(overview) {
+	const { context } = createHelper({ config: {} });
+	return JSON.parse(JSON.stringify(context.parseProfiles(overview)));
 }
 
 // What the node helper reports when phase6 answers with failure()
@@ -262,7 +268,7 @@ test("reports a missing username or password without asking phase6", async () =>
 	for (const [config, name] of [[{ username: "parent@example.com" }, "password"], [{ password: "secret" }, "username"], [{ username: " ", password: "secret" }, "username"]]) {
 		const { site, timers, notifications, logs } = createHelper({ config });
 		await settle();
-		assert.deepEqual(last(notifications), { accounts: null, fetchedAt: null, error: { code: "NO_CREDENTIALS", name, file: "config/config.js" } });
+		assert.deepEqual(last(notifications), { profiles: null, fetchedAt: null, error: { code: "NO_CREDENTIALS", name, file: "config/config.js" } });
 		assert.deepEqual(site.requests, []);
 		assert.equal(timers.size, 0);
 		assert.deepEqual(logs, [`error: The ${name} is missing in config/config.js. Add it, then restart MagicMirror². See the README.`]);
@@ -291,7 +297,7 @@ test("reports a login that phase6 rejects with a page of its own, and does not t
 test("reports a login that phase6 rejects, and does not try again", async () => {
 	const { site, timers, notifications, logs } = createHelper({ config: { ...CONFIG, password: "Hund123" } });
 	await settle();
-	assert.deepEqual(last(notifications), { accounts: null, fetchedAt: null, error: { code: "LOGIN_FAILED" } });
+	assert.deepEqual(last(notifications), { profiles: null, fetchedAt: null, error: { code: "LOGIN_FAILED" } });
 	assert.equal(site.requests.filter(({ method }) => method === "POST").length, 1);
 	assert.equal(timers.size, 0);
 	assert.equal(logs.length, 1);
@@ -330,10 +336,10 @@ test("keeps the profiles while phase6 is not reachable, and tries again in a min
 	const site = fakePhase6();
 	const { timers, notifications } = createHelper({ site });
 	await settle();
-	const { accounts, fetchedAt } = last(notifications);
+	const { profiles, fetchedAt } = last(notifications);
 	site.fail(() => new Response("", { status: 502 }));
 	await updateAgain(timers);
-	assert.deepEqual(last(notifications), { accounts, fetchedAt, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
+	assert.deepEqual(last(notifications), { profiles, fetchedAt, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
 	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
 	site.fail(null);
 	await updateAgain(timers);
@@ -423,33 +429,61 @@ test("logs a problem once, and again when it changes, and when phase6 works agai
 	]);
 });
 
-test("reads the profiles of the family overview", async () => {
-	assert.deepEqual(await accountsOf(OVERVIEW, { onlyChildren: false, hideSurname: false }), [
-		{ name: "Muster Lena", displayName: "Muster Lena", license: "PLUS inaktiv", lastLearned: null, dueVocab: 0, streakDays: 0 },
-		{ name: "Muster Emma", displayName: "Muster Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", dueVocab: 29, streakDays: 28 },
-		{ name: "Muster Noah", displayName: "Muster Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", dueVocab: 50, streakDays: 0 }
+test("shows the children by their first name", async () => {
+	assert.deepEqual((await sent({})).profiles, [
+		{ name: "Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", due: 29, streak: 28 },
+		{ name: "Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", due: 50, streak: 0 }
+	]);
+	assert.deepEqual((await sent({}, OVERVIEW.replace("Muster Emma", "Muster Anna Lena").replace("Muster Noah", "Noah"))).profiles.map(({ name }) => name), ["Anna Lena", "Noah"]);
+});
+
+test("shows all profiles if there are no children", async () => {
+	assert.deepEqual((await sent({}, OVERVIEW.replaceAll(" child ", " "))).profiles.map(({ name }) => name), ["Lena", "Emma", "Noah"]);
+});
+
+test("shows the profiles of the option profiles, in its order and with its names", async () => {
+	assert.deepEqual((await sent({ profiles: ["noah", "Muster Emma", "Lena"] })).profiles.map(({ name, due }) => [name, due]), [["noah", 50], ["Muster Emma", 29], ["Lena", 0]]);
+	assert.deepEqual((await sent({ profiles: "Emma" })).profiles.map(({ name, due }) => [name, due]), [["Emma", 29]]);
+});
+
+test("reports the names in profiles and dueAdjustments that match no profile", async () => {
+	const { notifications, logs } = createHelper({ config: { ...CONFIG, profiles: ["Emma", "Ben"], dueAdjustments: { Mia: -1 } } });
+	await settle();
+	const { profiles, error } = last(notifications);
+	assert.deepEqual(profiles.map(({ name }) => name), ["Emma"]);
+	assert.deepEqual(error, { code: "UNKNOWN_PROFILE", name: "Ben, Mia", names: "Lena, Emma, Noah" });
+	assert.equal(logs.at(-1), "error: phase6 has no profile Ben, Mia, only Lena, Emma, Noah. Correct profiles or dueAdjustments in config/config.js, then restart MagicMirror².");
+});
+
+test("adds dueAdjustments to the due vocabulary, but not below zero", async () => {
+	assert.deepEqual((await sent({ dueAdjustments: { emma: -1, Noah: "-60" } })).profiles.map(({ due }) => due), [28, 0]);
+});
+
+test("sends only what the module shows, without surnames", async () => {
+	const { notifications } = createHelper();
+	await settle();
+	assert.doesNotMatch(JSON.stringify(notifications), /Muster|Lena|@/);
+});
+
+test("reads the profiles of the family overview", () => {
+	assert.deepEqual(parse(OVERVIEW), [
+		{ name: "Muster Lena", child: false, license: "PLUS inaktiv", lastLearned: null, due: 0, streak: 0 },
+		{ name: "Muster Emma", child: true, license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", due: 29, streak: 28 },
+		{ name: "Muster Noah", child: true, license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", due: 50, streak: 0 }
 	]);
 });
 
-test("reads names with entities", async () => {
-	const [emma] = await accountsOf(OVERVIEW.replace("Muster Emma", "M&uuml;ller-L&#252;denscheidt Emma &amp; Co"), { hideSurname: false });
-	assert.equal(emma.name, "Müller-Lüdenscheidt Emma & Co");
+test("reads names with entities", () => {
+	assert.equal(parse(OVERVIEW.replace("Muster Emma", "M&uuml;ller J&#252;rgen &amp; L&#xe4;ra"))[1].name, "Müller Jürgen & Lära");
 });
 
-test("reads numbers with dots between thousands", async () => {
-	const [emma] = await accountsOf(OVERVIEW.replace("<span>29</span>", "<span>1.234</span>"));
-	assert.equal(emma.dueVocab, 1234);
+test("reads numbers with dots between thousands", () => {
+	assert.equal(parse(OVERVIEW.replace("<span>29</span>", "<span>1.234</span>"))[1].due, 1234);
 });
 
-test("skips panels without a profile", async () => {
+test("skips panels without a profile", () => {
 	const offer = "<div class=\"button row panel offer\"><b>PLUS für die ganze Familie</b><small>Jetzt testen</small></div>";
-	assert.deepEqual((await accountsOf(OVERVIEW.replace("<footer>", `${offer}<footer>`), { onlyChildren: false })).map(({ name }) => name), ["Muster Lena", "Muster Emma", "Muster Noah"]);
-});
-
-test("sends no e-mail addresses of the page to the browsers", async () => {
-	const { notifications } = createHelper();
-	await settle();
-	assert.doesNotMatch(JSON.stringify(notifications), /@/);
+	assert.deepEqual(parse(OVERVIEW.replace("<footer>", `${offer}<footer>`)).map(({ name }) => name), ["Muster Lena", "Muster Emma", "Muster Noah"]);
 });
 
 test("uses only invented e-mail addresses in the fixtures", () => {

@@ -9,21 +9,11 @@
  * @see https://github.com/ms-zone-41/MMM-phase6
  */
 Module.register("MMM-phase6", {
-	// The options of the display. The node helper reads username, password and
-	// updateInterval from config.js.
+	// The options of the display. The node helper reads username, password,
+	// updateInterval, profiles and dueAdjustments from config.js.
 	defaults: {
 		title: "phase6",
 		showHeader: true,
-		showAccounts: [], // [] = show all; otherwise list of account names to show
-		excludeAccounts: [], // list of account names to hide
-		onlyChildren: true, // only show child profiles (recommended for /parent/ overview)
-
-		// Name / privacy options
-		// hideSurname: tries to remove the family name from the UI (useful for kids)
-		// It uses an "auto" heuristic (common token across profiles). If it fails,
-		// you can set surnameToHide explicitly.
-		hideSurname: true,
-		surnameToHide: "", // optional explicit surname to remove (case-insensitive)
 
 		// License label (e.g. "PLUS aktiv")
 		// The data is still scraped, but hidden in the UI by default.
@@ -37,9 +27,7 @@ Module.register("MMM-phase6", {
 		// Show a "Stand: ..." line below the table (fetch timestamp).
 		// Default is false to avoid extra noise.
 		showFetchedAt: false,
-		locale: "de-DE",
-		// Per-account adjustments to the Due count, e.g. { "Emma": -1 }
-		dueAdjustments: {}
+		locale: "de-DE"
 	},
 
 	// The node helper reads its options with getServerModuleConfig()
@@ -60,7 +48,7 @@ Module.register("MMM-phase6", {
 	start: function () {
 		// The profiles of the last update that worked and the problem of the
 		// last update, from the node helper
-		this.accounts = null;
+		this.profiles = null;
 		this.fetchedAt = null;
 		this.error = null;
 		this.loaded = false;
@@ -102,16 +90,8 @@ Module.register("MMM-phase6", {
 			wrapper.appendChild(warning);
 		}
 
-		if (!this.accounts) {
-			return wrapper;
-		}
-		const accounts = this.accounts;
-
-		if (!accounts.length) {
-			const empty = document.createElement("div");
-			empty.className = "dimmed light small";
-			empty.textContent = this.translate("NO_PROFILES");
-			wrapper.appendChild(empty);
+		// No profiles to show come with a problem
+		if (!this.profiles?.length) {
 			return wrapper;
 		}
 
@@ -136,51 +116,22 @@ Module.register("MMM-phase6", {
 		table.appendChild(thead);
 
 		const tbody = document.createElement("tbody");
-		const filter = (this.config.showAccounts || []).map((s) => (s || "").toLowerCase()).filter(Boolean);
-		const exclude = (this.config.excludeAccounts || []).map((s) => (s || "").toLowerCase()).filter(Boolean);
-
-		// Build a normalized lookup for dueAdjustments (case- and whitespace-insensitive).
-		const adjMap = this.config.dueAdjustments || {};
-		const adjLookup = new Map();
-		for (const [k, v] of Object.entries(adjMap)) {
-			adjLookup.set(String(k).trim().toLowerCase(), v);
-		}
-		const findAdj = (name) => {
-			if (!name) return undefined;
-			return adjLookup.get(String(name).trim().toLowerCase());
-		};
-
-		accounts.forEach((acc) => {
-			const fullName = acc.name || "";
-			const displayName = acc.displayName || acc.name || "—";
-
-			const candidates = [fullName, displayName].map((s) => String(s || "").toLowerCase()).filter(Boolean);
-
-			if (exclude.length && candidates.some((c) => exclude.includes(c))) return;
-			if (filter.length && !candidates.some((c) => filter.includes(c))) return;
-
+		this.profiles.forEach((profile) => {
 			const tr = document.createElement("tr");
 
-			// Compute adjusted due count
-			let dueVal = acc.dueVocab;
-			if (dueVal != null && adjLookup.size > 0) {
-				const adj = findAdj(displayName) ?? findAdj(fullName) ?? 0;
-				dueVal = Math.max(0, Number(dueVal) + adj);
-			}
-
+			// Bold while vocabulary is due
 			const tdName = document.createElement("td");
-			const hasDue = dueVal != null && Number(dueVal) > 0;
-			tdName.className = hasDue ? "mmm-phase6-name mmm-phase6-name-bold" : "mmm-phase6-name";
+			tdName.className = profile.due > 0 ? "mmm-phase6-name mmm-phase6-name-bold" : "mmm-phase6-name";
 
 			const nameDiv = document.createElement("div");
 			nameDiv.className = "mmm-phase6-name-main";
-			nameDiv.textContent = displayName;
+			nameDiv.textContent = profile.name;
 			tdName.appendChild(nameDiv);
 
-			if (this.config.showLicense && acc.license) {
+			if (this.config.showLicense && profile.license) {
 				const lic = document.createElement("div");
 				lic.className = "mmm-phase6-license dimmed light xsmall";
-				lic.textContent = String(acc.license);
+				lic.textContent = profile.license;
 				tdName.appendChild(lic);
 			}
 
@@ -188,17 +139,17 @@ Module.register("MMM-phase6", {
 
 			const tdLast = document.createElement("td");
 			tdLast.className = "mmm-phase6-last";
-			tdLast.textContent = this.config.showLastLearned ? this.formatLastLearned(acc.lastLearned) : "—";
+			tdLast.textContent = this.config.showLastLearned ? this.formatLastLearned(profile.lastLearned) : "—";
 			tr.appendChild(tdLast);
 
 			const tdDue = document.createElement("td");
 			tdDue.className = "mmm-phase6-due";
-			tdDue.textContent = this.config.showDueVocab ? (dueVal != null ? String(dueVal) : "—") : "—";
+			tdDue.textContent = this.config.showDueVocab ? String(profile.due) : "—";
 			tr.appendChild(tdDue);
 
 			const tdStreak = document.createElement("td");
 			tdStreak.className = "mmm-phase6-streak";
-			tdStreak.textContent = this.config.showStreak ? (acc.streakDays != null ? String(acc.streakDays) : "—") : "—";
+			tdStreak.textContent = this.config.showStreak ? String(profile.streak) : "—";
 			tr.appendChild(tdStreak);
 
 			tbody.appendChild(tr);
@@ -260,7 +211,7 @@ Module.register("MMM-phase6", {
 	socketNotificationReceived: function (notification, payload) {
 		if (notification === "PROFILES") {
 			this.loaded = true;
-			this.accounts = payload.accounts;
+			this.profiles = payload.profiles;
 			this.fetchedAt = payload.fetchedAt;
 			this.error = payload.error;
 			this.updateDom();

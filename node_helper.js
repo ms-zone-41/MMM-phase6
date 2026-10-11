@@ -90,105 +90,43 @@ function parseLoginForm(html) {
 	};
 }
 
-function tokenizeName(name) {
-	return String(name || "")
-		.split(/\s+/)
-		.map((t) => t.trim())
-		.filter(Boolean);
+// The words of a name, in lower case
+function wordsOf(name) {
+	return String(name).toLowerCase().split(/\s+/).filter(Boolean);
 }
 
-function stripTokenFromName(name, tokenOrPhrase) {
-	const tokensToRemove = tokenizeName(tokenOrPhrase);
-	if (!tokensToRemove.length) return String(name || "").trim();
-
-	const removeSet = new Set(tokensToRemove.map((t) => t.toLowerCase()));
-	const parts = tokenizeName(name);
-	const cleaned = parts.filter((p) => !removeSet.has(p.toLowerCase()));
-	return cleaned.length ? cleaned.join(" ") : String(name || "").trim();
+// Whether a name on phase6, e.g. "Muster Emma", has all the words of a name
+// in the config, e.g. "Emma"
+function matches(name, wanted) {
+	const words = wordsOf(name);
+	const wantedWords = wordsOf(wanted);
+	return wantedWords.length > 0 && wantedWords.every((word) => words.includes(word));
 }
 
-function inferSurnameToken(childNames, parentName) {
-	const children = Array.isArray(childNames) ? childNames.filter(Boolean) : [];
-	const parent = String(parentName || "").trim();
-
-	// 1) If there are at least two children, take intersection of tokens.
-	if (children.length >= 2) {
-		const tokenSets = children.map((n) => new Set(tokenizeName(n).map((t) => t.toLowerCase())));
-		const first = Array.from(tokenSets[0]);
-		const common = first.filter((t) => tokenSets.every((s) => s.has(t)));
-		if (common.length) {
-			// Prefer the longest token (often the surname)
-			common.sort((a, b) => b.length - a.length);
-			return common[0];
-		}
-	}
-
-	// 2) Fallback: choose the parent token that occurs most in children.
-	if (parent && children.length) {
-		const parentTokens = tokenizeName(parent).map((t) => t.toLowerCase());
-		const childTokenSets = children.map((n) => new Set(tokenizeName(n).map((t) => t.toLowerCase())));
-
-		let best = "";
-		let bestCount = 0;
-		for (const pt of parentTokens) {
-			let count = 0;
-			for (const s of childTokenSets) if (s.has(pt)) count++;
-
-			if (count > bestCount || (count === bestCount && pt.length > best.length)) {
-				best = pt;
-				bestCount = count;
-			}
-		}
-
-		// Only accept if it actually matches at least one child.
-		if (best && bestCount >= 1) return best;
-	}
-
-	return "";
+// The first name: phase6 shows the surname first, e.g. "Muster Emma"
+function firstName(name) {
+	return name.split(" ").slice(1).join(" ") || name;
 }
 
-// The accounts to show, with the names to show
-function selectAccounts(profiles, config) {
-	const includeNames = Array.isArray(config.showAccounts)
-		? config.showAccounts.map((s) => String(s || "").toLowerCase()).filter(Boolean)
-		: [];
-
-	const excludeNames = Array.isArray(config.excludeAccounts)
-		? config.excludeAccounts.map((s) => String(s || "").toLowerCase()).filter(Boolean)
-		: [];
-
-	const explicitSurname = String(config.surnameToHide || "").trim();
-	const childNames = profiles.filter((p) => p.child).map((p) => p.name);
-	const parentName = (profiles.find((p) => !p.child) || {}).name || "";
-
-	// Decide which token(s) to remove from display names.
-	const surnameToken = explicitSurname
-		? explicitSurname
-		: (config.hideSurname === true ? inferSurnameToken(childNames, parentName) : "");
-
-	const accounts = [];
-	for (const p of profiles) {
-		if (config.onlyChildren === true && !p.child) continue;
-
-		const displayName = (config.hideSurname === true && surnameToken)
-			? stripTokenFromName(p.name, surnameToken)
-			: p.name;
-
-		// Allow filtering by either full name or display name.
-		const candidates = [p.name, displayName].map((n) => n.toLowerCase());
-		if (includeNames.length && !candidates.some((c) => includeNames.includes(c))) continue;
-		if (candidates.some((c) => excludeNames.includes(c))) continue;
-
-		accounts.push({
-			name: p.name,
-			displayName,
-			license: p.license || null,
-			lastLearned: p.lastLearned,
-			dueVocab: p.due,
-			streakDays: p.streak
-		});
-	}
-	return accounts;
+// What the module shows of the profiles, and the names in the options that
+// match no profile. The profiles are those of the option profiles, in its
+// order and with its names, or else the children by their first name, or
+// all profiles if there are no children.
+function selectProfiles(profiles, options) {
+	// Also a single name, e.g. profiles: "Emma"
+	const wanted = [options.profiles].flat().filter(Boolean);
+	const children = profiles.filter((profile) => profile.child);
+	const rows = wanted.length > 0
+		? wanted.map((name) => [String(name), profiles.find((profile) => matches(profile.name, name))])
+		: (children.length > 0 ? children : profiles).map((profile) => [firstName(profile.name), profile]);
+	const adjustments = typeof options.dueAdjustments === "object" ? Object.entries(options.dueAdjustments ?? {}) : [];
+	return {
+		shown: rows.filter(([, profile]) => profile).map(([name, profile]) => {
+			const adjustment = Number(adjustments.find(([key]) => matches(profile.name, key))?.[1]) || 0;
+			return { name, license: profile.license, lastLearned: profile.lastLearned, due: Math.max(0, profile.due + adjustment), streak: profile.streak };
+		}),
+		unknown: [...rows.filter(([, profile]) => !profile).map(([name]) => name), ...adjustments.map(([key]) => key).filter((key) => !profiles.some((profile) => matches(profile.name, key)))]
+	};
 }
 
 // The website of phase6, which is the only one the node helper asks
@@ -211,11 +149,8 @@ const DEFAULTS = {
 	username: "",
 	password: "",
 	updateInterval: 10 * MINUTE,
-	onlyChildren: true,
-	showAccounts: [],
-	excludeAccounts: [],
-	hideSurname: true,
-	surnameToHide: ""
+	profiles: [],
+	dueAdjustments: {}
 };
 
 // What the log adds about each problem: what to do
@@ -224,7 +159,8 @@ const HINTS = {
 	LOGIN_FAILED: "Check the username and the password by logging in at https://www.phase-6.de, correct them, then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
 	NOT_REACHABLE: "The module tries again in a minute.",
 	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",
-	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues."
+	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues.",
+	UNKNOWN_PROFILE: "Correct profiles or dueAdjustments in config/config.js, then restart MagicMirror²."
 };
 
 // A problem that the module shows, by its code, with the variables of its
@@ -244,7 +180,7 @@ module.exports = NodeHelper.create({
 		this.cookies = new Map();
 		// Nothing to send until the first update has finished
 		this.state = null;
-		this.accounts = null;
+		this.profiles = null;
 		this.fetchedAt = null;
 		// An updateInterval in seconds or in minutes would load phase6 again and
 		// again
@@ -296,8 +232,14 @@ module.exports = NodeHelper.create({
 	async update() {
 		let error = null;
 		try {
-			this.accounts = selectAccounts(await this.fetchProfiles(), this.config);
+			const profiles = await this.fetchProfiles();
+			const { shown, unknown } = selectProfiles(profiles, this.config);
+			this.profiles = shown;
 			this.fetchedAt = new Date().toISOString();
+			if (unknown.length > 0) {
+				const names = profiles.map((profile) => firstName(profile.name)).join(", ");
+				error = problem("UNKNOWN_PROFILE", { name: unknown.join(", "), names }, `phase6 has no profile ${unknown.join(", ")}, only ${names}`);
+			}
 		} catch (thrown) {
 			error = thrown;
 		}
@@ -319,8 +261,8 @@ module.exports = NodeHelper.create({
 	report(error) {
 		// Errors of Node.js have codes too, e.g. ERR_INVALID_URL
 		const hint = HINTS[error?.code];
-		const shown = error && (hint ? { code: error.code, ...error.variables } : { code: "MODULE_ERROR_UNSPECIFIED" });
-		if (error && JSON.stringify(shown) !== JSON.stringify(this.state?.error)) {
+		const reported = error && (hint ? { code: error.code, ...error.variables } : { code: "MODULE_ERROR_UNSPECIFIED" });
+		if (error && JSON.stringify(reported) !== JSON.stringify(this.state?.error)) {
 			if (hint) {
 				Log.error(`${error.message}. ${hint}`);
 			} else {
@@ -329,7 +271,7 @@ module.exports = NodeHelper.create({
 		} else if (!error && this.state?.error) {
 			Log.info("phase6 works again");
 		}
-		this.state = { accounts: this.accounts, fetchedAt: this.fetchedAt, error: shown };
+		this.state = { profiles: this.profiles, fetchedAt: this.fetchedAt, error: reported };
 		this.sendSocketNotification("PROFILES", this.state);
 	},
 

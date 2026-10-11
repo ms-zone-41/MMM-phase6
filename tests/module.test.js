@@ -27,9 +27,9 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../MMM-phase6.js"), "ut
 	document
 });
 
-// The accounts as the node helper sends them
-const EMMA = { name: "Muster Emma", displayName: "Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", dueVocab: 29, streakDays: 28 };
-const NOAH = { name: "Muster Noah", displayName: "Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", dueVocab: 0, streakDays: 3 };
+// The profiles as the node helper sends them
+const EMMA = { name: "Emma", license: "PLUS aktiv", lastLearned: "10.10.2026 15:25", due: 29, streak: 28 };
+const NOAH = { name: "Noah", license: "PLUS aktiv", lastLearned: "09.10.2026 07:09", due: 0, streak: 3 };
 
 // Start the module in a mirror with the given language, with stand-ins for
 // the methods of MagicMirror²
@@ -54,11 +54,11 @@ function createModule(options = {}, language = "en") {
 	return module;
 }
 
-// Send the accounts from the node helper to the module, as JSON like
+// Send the profiles from the node helper to the module, as JSON like
 // socket.io, and return what the module shows once it has asked for an update
-function receive(module, accounts, error = null) {
+function receive(module, profiles, error = null) {
 	const updates = module.updates;
-	module.socketNotificationReceived("PROFILES", JSON.parse(JSON.stringify({ accounts, fetchedAt: "2026-10-10T16:00:00.000Z", error })));
+	module.socketNotificationReceived("PROFILES", JSON.parse(JSON.stringify({ profiles, fetchedAt: "2026-10-10T16:00:00.000Z", error })));
 	assert.equal(module.updates, updates + 1);
 	return module.getDom();
 }
@@ -90,6 +90,11 @@ test("shows the profiles in a table, with a header in the language of the mirror
 	assert.deepEqual(rows(receive(createModule({}, "de"), [EMMA]))[0], ["", "Zuletzt", "Fällig", "Serie"]);
 });
 
+test("makes the names of the profiles with due vocabulary bold", () => {
+	const dom = receive(createModule(), [EMMA, NOAH]);
+	assert.deepEqual(Array.from(dom.querySelectorAll("td.mmm-phase6-name"), (cell) => cell.classList.contains("mmm-phase6-name-bold")), [true, false]);
+});
+
 test("shows a problem without a table if no update has worked yet", () => {
 	const dom = receive(createModule({}, "de"), null, { code: "LOGIN_FAILED" });
 	assert.equal(warning(dom), "phase6 hat den Login abgelehnt: Benutzername und Passwort prüfen, dann MagicMirror² neu starten");
@@ -104,25 +109,27 @@ test("shows a problem above the profiles of the last update that worked, dimmed"
 	assert.ok(!receive(createModule(), [EMMA, NOAH]).querySelector("table").classList.contains("mmm-phase6-stale"));
 });
 
+test("shows only the problem if no profile matches", () => {
+	const dom = receive(createModule(), [], { code: "UNKNOWN_PROFILE", name: "Ben", names: "Lena, Emma, Noah" });
+	assert.equal(dom.textContent, "phase6 has no profile Ben. Profiles: Lena, Emma, Noah");
+	assert.equal(dom.querySelector("table"), null);
+});
+
 test("fills in the variables of a problem", () => {
 	assert.equal(warning(receive(createModule({}, "de"), null, { code: "NO_CREDENTIALS", name: "SECRET_PHASE6_PASSWORD", file: "config/config.env" })), "SECRET_PHASE6_PASSWORD fehlt in config/config.env");
 });
 
 test("has a message for each problem of the node helper, in each language", () => {
 	for (const language of ["en", "de"]) {
-		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "NOT_REACHABLE", "NO_FAMILY"]) {
+		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "NOT_REACHABLE", "NO_FAMILY", "UNKNOWN_PROFILE"]) {
 			assert.ok(TRANSLATIONS[language][code], `${language}: ${code}`);
 		}
 	}
 	assert.deepEqual(Object.keys(TRANSLATIONS.de).sort(), Object.keys(TRANSLATIONS.en).sort());
 });
 
-test("says so if there are no profiles to show", () => {
-	assert.equal(receive(createModule(), []).textContent, "No profiles to show");
-});
-
 test("shows names as text, not as HTML", () => {
-	const dom = receive(createModule(), [{ ...EMMA, displayName: "<b>Emma</b>" }]);
+	const dom = receive(createModule(), [{ ...EMMA, name: "<b>Emma</b>" }]);
 	assert.equal(rows(dom)[1][0], "<b>Emma</b>");
 	assert.equal(dom.querySelector("td b"), null);
 });
