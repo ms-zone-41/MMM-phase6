@@ -58,7 +58,10 @@ Module.register("MMM-phase6", {
 	},
 
 	start: function () {
-		this.dataPayload = null;
+		// The profiles of the last update that worked and the problem of the
+		// last update, from the node helper
+		this.accounts = null;
+		this.fetchedAt = null;
 		this.error = null;
 		this.loaded = false;
 
@@ -66,7 +69,14 @@ Module.register("MMM-phase6", {
 	},
 
 	getStyles: function () {
-		return ["phase6.css"];
+		return ["font-awesome.css", "phase6.css"];
+	},
+
+	getTranslations: function () {
+		return {
+			en: "translations/en.json",
+			de: "translations/de.json"
+		};
 	},
 
 	getDom: function () {
@@ -74,45 +84,47 @@ Module.register("MMM-phase6", {
 		wrapper.className = "mmm-phase6";
 
 		if (!this.loaded) {
-			wrapper.innerHTML = "<span class='dimmed light small'>Loading phase6 data &hellip;</span>";
+			const loading = document.createElement("span");
+			loading.className = "dimmed light small";
+			loading.textContent = this.translate("LOADING");
+			wrapper.appendChild(loading);
 			return wrapper;
 		}
 
+		// The problem of the last update, with the profiles of the last update
+		// that worked below it, if any
 		if (this.error) {
-			const errTitle = document.createElement("span");
-			errTitle.className = "bright small";
-			errTitle.textContent = "phase6: Error";
-			const errBr = document.createElement("br");
-			const errMsg = document.createElement("span");
-			errMsg.className = "dimmed light small";
-			errMsg.textContent = this.error;
-			wrapper.appendChild(errTitle);
-			wrapper.appendChild(errBr);
-			wrapper.appendChild(errMsg);
-			return wrapper;
+			const warning = document.createElement("div");
+			warning.className = "mmm-phase6-warning small";
+			const icon = document.createElement("i");
+			icon.className = "fa-solid fa-triangle-exclamation";
+			warning.append(icon, this.translate(this.error.code, this.error));
+			wrapper.appendChild(warning);
 		}
 
-		const payload = this.dataPayload || {};
-		const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+		if (!this.accounts) {
+			return wrapper;
+		}
+		const accounts = this.accounts;
 
 		if (!accounts.length) {
 			const empty = document.createElement("div");
 			empty.className = "dimmed light small";
-			empty.textContent = "No data found.";
+			empty.textContent = this.translate("NO_PROFILES");
 			wrapper.appendChild(empty);
 			return wrapper;
 		}
 
 		const table = document.createElement("table");
-		table.className = "small";
+		table.className = this.error ? "small mmm-phase6-stale" : "small";
 
 		const thead = document.createElement("thead");
 		const hr = document.createElement("tr");
 		const headers = [
-			{ label: "Profile", className: "mmm-phase6-col-name" },
-			{ label: "Last", className: "mmm-phase6-col-last" },
-			{ label: "Due", className: "mmm-phase6-col-due" },
-			{ label: "Streak", className: "mmm-phase6-col-streak" }
+			{ label: "", className: "mmm-phase6-col-name" },
+			{ label: this.translate("LAST_LEARNED"), className: "mmm-phase6-col-last" },
+			{ label: this.translate("DUE"), className: "mmm-phase6-col-due" },
+			{ label: this.translate("STREAK"), className: "mmm-phase6-col-streak" }
 		];
 		headers.forEach((h) => {
 			const th = document.createElement("th");
@@ -195,15 +207,10 @@ Module.register("MMM-phase6", {
 		table.appendChild(tbody);
 		wrapper.appendChild(table);
 
-		if (this.config.showFetchedAt && payload.fetchedAt) {
+		if (this.config.showFetchedAt && this.fetchedAt) {
 			const ft = document.createElement("div");
 			ft.className = "mmm-phase6-fetched dimmed light xsmall";
-			try {
-				const d = new Date(payload.fetchedAt);
-				ft.textContent = "Updated: " + d.toLocaleString(this.config.locale || "de-DE");
-			} catch {
-				ft.textContent = "Updated: " + payload.fetchedAt;
-			}
+			ft.textContent = this.translate("UPDATED", { time: new Date(this.fetchedAt).toLocaleString(this.config.locale || "de-DE") });
 			wrapper.appendChild(ft);
 		}
 
@@ -253,15 +260,9 @@ Module.register("MMM-phase6", {
 	socketNotificationReceived: function (notification, payload) {
 		if (notification === "PROFILES") {
 			this.loaded = true;
-
-			if (!payload || payload.ok !== true) {
-				this.error = (payload && payload.error) ? payload.error : "Unknown error.";
-				this.dataPayload = null;
-			} else {
-				this.error = null;
-				this.dataPayload = payload.data || null;
-			}
-
+			this.accounts = payload.accounts;
+			this.fetchedAt = payload.fetchedAt;
+			this.error = payload.error;
 			this.updateDom();
 		}
 	}

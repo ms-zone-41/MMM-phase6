@@ -16,10 +16,12 @@ const CONFIG = { username: "parent@example.com", password: "secret" };
 function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 	const timers = new Set();
 	const notifications = [];
+	const logs = [];
+	const log = (level) => (...args) => logs.push(`${level}: ${args.join(" ")}`);
 	const context = {
 		require: (name) => ({
 			node_helper: { create: (definition) => definition },
-			logger: { debug() {}, log() {}, info() {}, warn() {}, error() {} }
+			logger: { debug() {}, log() {}, info: log("info"), warn: log("warn"), error: log("error") }
 		})[name],
 		module: {},
 		// The stand-in answers instead of phase6
@@ -42,7 +44,7 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		sendSocketNotification: (notification, payload) => notifications.push({ notification, payload: JSON.parse(JSON.stringify(payload)) })
 	});
 	helper.start();
-	return { helper, site, timers, notifications };
+	return { helper, site, timers, notifications, logs };
 }
 
 // Wait until the update has finished: the stand-in answers at once, so a few
@@ -61,16 +63,32 @@ async function updateAgain(timers) {
 	await settle();
 }
 
-// The names of the profiles that the node helper sent last
+// What the node helper sent last
+function last(notifications) {
+	return notifications.at(-1).payload;
+}
+
+// The names of the profiles that the node helper sent last, from an update
+// that worked
 function names(notifications) {
-	return notifications.at(-1).payload.data.accounts.map((account) => account.displayName);
+	assert.equal(last(notifications).error, null);
+	return last(notifications).accounts.map((account) => account.displayName);
 }
 
 // The accounts that the node helper sends for a family overview
 async function accountsOf(overview, config = {}) {
 	const { notifications } = createHelper({ config: { ...CONFIG, ...config }, site: fakePhase6({ overview }) });
 	await settle();
-	return notifications.at(-1).payload.data.accounts;
+	return last(notifications).accounts;
+}
+
+// What the node helper reports when phase6 answers with failure()
+async function problemOf(failure) {
+	const site = fakePhase6();
+	site.fail(failure);
+	const { notifications } = createHelper({ site });
+	await settle();
+	return last(notifications).error;
 }
 
 test("logs in with the options of config.js and sends the profiles of the children", async () => {
@@ -91,7 +109,7 @@ test("asks only www.phase-6.de", async () => {
 });
 
 test("logs in with the form of the login page and follows the redirects", async () => {
-	const { site } = createHelper();
+	const { site, logs } = createHelper();
 	await settle();
 	assert.deepEqual(site.requests.map(({ method, path }) => `${method} ${path}`), [
 		"GET /classic/service/user/parent/",
@@ -106,6 +124,7 @@ test("logs in with the form of the login page and follows the redirects", async 
 	assert.deepEqual(Object.keys(login.form), ["josso_cmd", "josso_back_to", "josso_on_error", "josso_username", "josso_password"]);
 	assert.equal(login.form.josso_back_to, "https://www.phase-6.de/classic/service/user/login-redirect-on-success.jsp");
 	assert.ok(site.requests.every(({ redirect, signal }) => redirect === "manual" && signal));
+	assert.deepEqual(logs, ["info: Logged in to phase6"]);
 });
 
 test("posts all hidden fields of the login form, also new ones", async () => {
@@ -158,13 +177,6 @@ test("loads the family overview after a login that lands on another page", async
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
 });
 
-test("reports a login that phase6 rejects", async () => {
-	const { site, notifications } = createHelper({ config: { ...CONFIG, password: "wrong" } });
-	await settle();
-	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "phase6 rejected the username or the password" });
-	assert.equal(site.requests.at(-1).path, "/classic/service/user/login.html?ErrorCode=user.login.wrong&josso_back_to=https%3A%2F%2Fwww.phase-6.de%2Fclassic%2Fservice%2Fuser%2F");
-});
-
 test("forgets the cookies that phase6 deletes", async () => {
 	const site = fakePhase6();
 	const { timers } = createHelper({ site });
@@ -176,42 +188,6 @@ test("forgets the cookies that phase6 deletes", async () => {
 	await updateAgain(timers);
 	assert.equal(site.requests[requests].cookies.JOSSO_SESSIONID, undefined);
 	assert.equal(site.requests.slice(requests).filter(({ method }) => method === "POST").length, 1);
-});
-
-test("reports a problem of the connection, a timeout and an HTTP error", async () => {
-	const breaking = (error) => () => new Response(new ReadableStream({
-		pull(controller) {
-			controller.error(error);
-		}
-	}));
-	const problems = [
-		[() => {
-			throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND www.phase-6.de"), { code: "ENOTFOUND" }) });
-		}, "phase6 cannot be reached: ENOTFOUND"],
-		[() => {
-			throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-		}, "phase6 did not answer within 30 seconds"],
-		[() => new Response("Wartungsarbeiten", { status: 503 }), "phase6 answered with HTTP 503"],
-		// While phase6 sends a page, too
-		[breaking(new DOMException("The operation was aborted due to timeout", "TimeoutError")), "phase6 did not answer within 30 seconds"],
-		[breaking(Object.assign(new TypeError("terminated"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) })), "phase6 cannot be reached: UND_ERR_SOCKET"]
-	];
-	for (const [failure, error] of problems) {
-		const site = fakePhase6();
-		site.fail(failure);
-		const { notifications } = createHelper({ site });
-		await settle();
-		assert.deepEqual(notifications.at(-1).payload, { ok: false, error });
-	}
-});
-
-test("follows no redirect to another website, so cookies go only to phase6", async () => {
-	const site = fakePhase6();
-	site.fail((url) => (new URL(url).pathname === "/classic/service/user/" ? new Response(null, { status: 302, headers: { location: "https://example.com/wartung" } }) : null));
-	const { notifications } = createHelper({ site });
-	await settle();
-	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "phase6 redirected to https://example.com" });
-	assert.ok(site.requests.every(({ host }) => host === "www.phase-6.de"));
 });
 
 test("takes no options from socket notifications", async () => {
@@ -248,9 +224,23 @@ test("updates again updateInterval after an update has finished", async () => {
 });
 
 test("updates every 10 minutes by default", async () => {
-	const { timers } = createHelper();
+	const { timers, logs } = createHelper();
 	await settle();
 	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+	assert.ok(!logs.some((line) => line.startsWith("warn:")));
+});
+
+test("updates at most once a minute, e.g. for an updateInterval in seconds", async () => {
+	const { timers, logs } = createHelper({ config: { ...CONFIG, updateInterval: 600 } });
+	await settle();
+	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
+	assert.deepEqual(logs.filter((line) => line.startsWith("warn:")), ["warn: updateInterval is 600 milliseconds: the module updates every 60 seconds instead."]);
+});
+
+test("limits updateInterval to the longest delay of setTimeout(), about 24 days", async () => {
+	const { timers } = createHelper({ config: { ...CONFIG, updateInterval: 30 * 24 * 60 * 60 * 1000 } });
+	await settle();
+	assert.deepEqual([...timers].map(({ delay }) => delay), [2 ** 31 - 1]);
 });
 
 test("stops updating when MagicMirror² stops", async () => {
@@ -268,11 +258,169 @@ test("reports nothing and does not update again when MagicMirror² stops during 
 	assert.equal(timers.size, 0);
 });
 
-test("reports a missing username or password", async () => {
-	const { site, notifications } = createHelper({ config: { username: "parent@example.com" } });
+test("reports a missing username or password without asking phase6", async () => {
+	for (const [config, name] of [[{ username: "parent@example.com" }, "password"], [{ password: "secret" }, "username"], [{ username: " ", password: "secret" }, "username"]]) {
+		const { site, timers, notifications, logs } = createHelper({ config });
+		await settle();
+		assert.deepEqual(last(notifications), { accounts: null, fetchedAt: null, error: { code: "NO_CREDENTIALS", name, file: "config/config.js" } });
+		assert.deepEqual(site.requests, []);
+		assert.equal(timers.size, 0);
+		assert.deepEqual(logs, [`error: The ${name} is missing in config/config.js. Add it, then restart MagicMirror². See the README.`]);
+	}
+});
+
+test("reports a variable of config/config.env that is not set", async () => {
+	// MagicMirror² leaves a variable as it is when config.env does not set it
+	const { site, notifications, logs } = createHelper({ config: { username: "parent@example.com", password: "${SECRET_PHASE6_PASSWORD}" } });
 	await settle();
-	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "No credentials configured. Set username and password in config.js." });
+	assert.deepEqual(last(notifications).error, { code: "NO_CREDENTIALS", name: "SECRET_PHASE6_PASSWORD", file: "config/config.env" });
 	assert.deepEqual(site.requests, []);
+	assert.match(logs[0], /^error: config\.js uses \$\{SECRET_PHASE6_PASSWORD\} as the password, but config\/config\.env does not set SECRET_PHASE6_PASSWORD\./);
+});
+
+test("reports a login that phase6 rejects with a page of its own, and does not try again", async () => {
+	const site = fakePhase6();
+	site.fail((url) => (new URL(url).pathname === "/session/login-web" ? new Response("Benutzername oder Passwort falsch") : null));
+	const { timers, notifications, logs } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "LOGIN_FAILED" });
+	assert.equal(timers.size, 0);
+	assert.ok(!logs.includes("info: Logged in to phase6"));
+});
+
+test("reports a login that phase6 rejects, and does not try again", async () => {
+	const { site, timers, notifications, logs } = createHelper({ config: { ...CONFIG, password: "Hund123" } });
+	await settle();
+	assert.deepEqual(last(notifications), { accounts: null, fetchedAt: null, error: { code: "LOGIN_FAILED" } });
+	assert.equal(site.requests.filter(({ method }) => method === "POST").length, 1);
+	assert.equal(timers.size, 0);
+	assert.equal(logs.length, 1);
+	assert.match(logs[0], /^error: phase6 rejected the login \(user\.login\.wrong\)\. Check the username and the password .* restart MagicMirror²/);
+	assert.doesNotMatch(logs[0], /Hund123/);
+});
+
+test("reports that phase6 is not reachable: no connection, a timeout or an error of phase6", async () => {
+	assert.deepEqual(await problemOf(() => {
+		throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND www.phase-6.de"), { code: "ENOTFOUND" }) });
+	}), { code: "NOT_REACHABLE", detail: "ENOTFOUND" });
+	assert.deepEqual(await problemOf(() => {
+		throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+	}), { code: "NOT_REACHABLE", detail: "timeout" });
+	assert.deepEqual(await problemOf(() => new Response("Wartungsarbeiten", { status: 503 })), { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	// While phase6 sends a page, too
+	const breaking = (error) => () => new Response(new ReadableStream({
+		pull(controller) {
+			controller.error(error);
+		}
+	}));
+	assert.deepEqual(await problemOf(breaking(new DOMException("The operation was aborted due to timeout", "TimeoutError"))), { code: "NOT_REACHABLE", detail: "timeout" });
+	assert.deepEqual(await problemOf(breaking(Object.assign(new TypeError("terminated"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }))), { code: "NOT_REACHABLE", detail: "UND_ERR_SOCKET" });
+});
+
+test("reports too many requests, and tries again at the next update", async () => {
+	const site = fakePhase6();
+	site.fail(() => new Response("Zu viele Anfragen", { status: 429 }));
+	const { timers, notifications } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "MODULE_ERROR_RATE_LIMITED" });
+	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+});
+
+test("keeps the profiles while phase6 is not reachable, and tries again in a minute", async () => {
+	const site = fakePhase6();
+	const { timers, notifications } = createHelper({ site });
+	await settle();
+	const { accounts, fetchedAt } = last(notifications);
+	site.fail(() => new Response("", { status: 502 }));
+	await updateAgain(timers);
+	assert.deepEqual(last(notifications), { accounts, fetchedAt, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
+	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
+	site.fail(null);
+	await updateAgain(timers);
+	assert.equal(last(notifications).error, null);
+	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+});
+
+test("reports when phase6 shows no family members, and tries again later", async () => {
+	for (const site of [
+		fakePhase6({ overview: "<html><body><p>Willkommen bei phase6</p></body></html>" }),
+		fakePhase6({ loginPage: "<html><body>Wartungsarbeiten</body></html>" })
+	]) {
+		const { timers, notifications } = createHelper({ site });
+		await settle();
+		assert.deepEqual(last(notifications).error, { code: "NO_FAMILY" });
+		assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+	}
+	assert.deepEqual(await problemOf((url) => (new URL(url).pathname === "/classic/service/user/parent/" ? new Response("", { status: 404 }) : null)), { code: "NO_FAMILY" });
+});
+
+test("reports a page of phase6 other than the family overview", async () => {
+	const site = fakePhase6();
+	site.fail((url) => {
+		const { pathname } = new URL(url);
+		if (pathname === "/classic/service/user/") {
+			return new Response(null, { status: 302, headers: { location: "/lernen/" } });
+		}
+		return pathname === "/lernen/" ? new Response("<html><body>Lernen</body></html>") : null;
+	});
+	const { notifications, logs } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "NO_FAMILY" });
+	assert.match(logs[0], /^error: phase6 shows \/lernen\/ instead of the family overview\./);
+});
+
+test("follows no redirect to another website or to http, so cookies go only to phase6", async () => {
+	for (const location of ["https://example.com/wartung", "http://www.phase-6.de/classic/service/user/login.html"]) {
+		const site = fakePhase6();
+		site.fail((url) => (new URL(url).pathname === "/classic/service/user/" ? new Response(null, { status: 302, headers: { location } }) : null));
+		const { notifications, logs } = createHelper({ site });
+		await settle();
+		assert.deepEqual(last(notifications).error, { code: "NO_FAMILY" });
+		assert.ok(logs[0].startsWith(`error: phase6 redirected to ${new URL(location).origin}. Use the login of the parent`), logs[0]);
+		assert.ok(site.requests.every(({ host }) => host === "www.phase-6.de"));
+	}
+});
+
+test("gives up after 10 redirects", async () => {
+	const site = fakePhase6();
+	site.fail((url) => (new URL(url).pathname === "/classic/service/user/" ? new Response(null, { status: 302, headers: { location: "/classic/service/user/" } }) : null));
+	const { notifications, logs } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "NO_FAMILY" });
+	assert.match(logs[0], /^error: phase6 redirected too often\./);
+	assert.equal(site.requests.length, 11);
+});
+
+test("reports an error of the module itself, with the error in the log", async () => {
+	// An answer without the headers of a response breaks the node helper
+	const site = fakePhase6();
+	site.fail(() => ({ status: 200, headers: {}, text: async () => "" }));
+	const { timers, notifications, logs } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "MODULE_ERROR_UNSPECIFIED" });
+	assert.match(logs[0], /^error: The update failed: TypeError: /);
+	assert.equal(timers.size, 1);
+	// Errors of Node.js with a code of their own, too
+	assert.deepEqual(await problemOf((url) => (new URL(url).pathname === "/classic/service/user/" ? new Response(null, { status: 302, headers: { location: "https://[" } }) : null)), { code: "MODULE_ERROR_UNSPECIFIED" });
+});
+
+test("logs a problem once, and again when it changes, and when phase6 works again", async () => {
+	const site = fakePhase6();
+	const { timers, logs } = createHelper({ site });
+	await settle();
+	site.fail(() => new Response("", { status: 503 }));
+	await updateAgain(timers);
+	await updateAgain(timers);
+	site.fail(() => new Response("", { status: 502 }));
+	await updateAgain(timers);
+	site.fail(null);
+	await updateAgain(timers);
+	assert.deepEqual(logs, [
+		"info: Logged in to phase6",
+		"error: phase6 is not reachable: HTTP 503. The module tries again in a minute.",
+		"error: phase6 is not reachable: HTTP 502. The module tries again in a minute.",
+		"info: phase6 works again"
+	]);
 });
 
 test("reads the profiles of the family overview", async () => {
@@ -309,10 +457,4 @@ test("uses only invented e-mail addresses in the fixtures", () => {
 		const addresses = fs.readFileSync(path.join(__dirname, "fixtures", file), "utf8").match(/[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [];
 		assert.deepEqual(addresses.filter((address) => !address.endsWith("@example.com")), [], file);
 	}
-});
-
-test("reports a login page without a login form", async () => {
-	const { notifications } = createHelper({ site: fakePhase6({ loginPage: "<html><body>Wartungsarbeiten</body></html>" }) });
-	await settle();
-	assert.deepEqual(notifications.at(-1).payload, { ok: false, error: "The login page of phase6 has no login form" });
 });

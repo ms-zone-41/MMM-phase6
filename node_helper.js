@@ -7,6 +7,7 @@
  */
 
 const NodeHelper = require("node_helper");
+const Log = require("logger");
 
 // The named entities that the pages of phase6 may have
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", auml: "ä", ouml: "ö", uuml: "ü", Auml: "Ä", Ouml: "Ö", Uuml: "Ü", szlig: "ß" };
@@ -192,12 +193,16 @@ function selectAccounts(profiles, config) {
 
 // The website of phase6, which is the only one the node helper asks
 const PHASE6 = "https://www.phase-6.de";
-// The family overview, with the profiles of the parent and the children
+// The family overview, "Meine Familie › Übersicht", with the profiles of the
+// parent and the children
 const OVERVIEW = `${PHASE6}/classic/service/user/parent/`;
 // Where phase6 sends a browser without a session, and a rejected login
 const LOGIN_PAGE = "/classic/service/user/login.html";
 // How long phase6 may take to answer a request, in milliseconds
 const TIMEOUT = 30 * 1000;
+// The shortest time between two updates, and the time until the next try
+// while phase6 is not reachable, in milliseconds
+const MINUTE = 60 * 1000;
 
 // The options of the node helper and their defaults. It reads them from
 // config.js only: any device that the ipWhitelist of MagicMirror² lets in can
@@ -205,13 +210,29 @@ const TIMEOUT = 30 * 1000;
 const DEFAULTS = {
 	username: "",
 	password: "",
-	updateInterval: 10 * 60 * 1000,
+	updateInterval: 10 * MINUTE,
 	onlyChildren: true,
 	showAccounts: [],
 	excludeAccounts: [],
 	hideSurname: true,
 	surnameToHide: ""
 };
+
+// What the log adds about each problem: what to do
+const HINTS = {
+	NO_CREDENTIALS: "Add it, then restart MagicMirror². See the README.",
+	LOGIN_FAILED: "Check the username and the password by logging in at https://www.phase-6.de, correct them, then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
+	NOT_REACHABLE: "The module tries again in a minute.",
+	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",
+	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues."
+};
+
+// A problem that the module shows, by its code, with the variables of its
+// message, and what the log says about it. The code is that of a message of
+// the module, or of MagicMirror², e.g. MODULE_ERROR_RATE_LIMITED.
+function problem(code, variables, log) {
+	return Object.assign(new Error(log), { code, variables });
+}
 
 module.exports = NodeHelper.create({
 	// getServerModuleConfig() came with MagicMirror² 2.38.0
@@ -223,6 +244,20 @@ module.exports = NodeHelper.create({
 		this.cookies = new Map();
 		// Nothing to send until the first update has finished
 		this.state = null;
+		this.accounts = null;
+		this.fetchedAt = null;
+		// An updateInterval in seconds or in minutes would load phase6 again and
+		// again
+		const interval = Number(this.config.updateInterval) || DEFAULTS.updateInterval;
+		this.interval = Math.min(Math.max(interval, MINUTE), 2 ** 31 - 1);
+		if (this.interval !== interval) {
+			Log.warn(`updateInterval is ${interval} milliseconds: the module updates every ${Math.round(this.interval / 1000)} seconds instead.`);
+		}
+		const missing = this.findMissingCredentials();
+		if (missing) {
+			this.report(missing);
+			return;
+		}
 		this.update();
 	},
 
@@ -238,50 +273,98 @@ module.exports = NodeHelper.create({
 		}
 	},
 
+	// A username or a password that is missing, or that is still a variable of
+	// config/config.env, e.g. ${SECRET_PHASE6_PASSWORD}: MagicMirror² leaves
+	// a variable as it is when config.env does not set it
+	findMissingCredentials() {
+		for (const option of ["username", "password"]) {
+			const value = String(this.config[option] ?? "");
+			const variable = (/\$\{(\w+)\}/).exec(value)?.[1];
+			if (variable) {
+				return problem("NO_CREDENTIALS", { name: variable, file: "config/config.env" }, `config.js uses \${${variable}} as the ${option}, but config/config.env does not set ${variable}`);
+			}
+			if (value.trim() === "") {
+				return problem("NO_CREDENTIALS", { name: option, file: "config/config.js" }, `The ${option} is missing in config/config.js`);
+			}
+		}
+		return null;
+	},
+
 	// Read the profiles from phase6, send them to the module, and update again
 	// updateInterval after the update has finished. So there is one update at
 	// a time, however many browsers show the mirror.
 	async update() {
+		let error = null;
 		try {
-			const accounts = selectAccounts(parseProfiles(await this.fetchOverview()), this.config);
-			this.state = { ok: true, data: { accounts, fetchedAt: new Date().toISOString() } };
-		} catch (err) {
-			this.state = { ok: false, error: err.message };
+			this.accounts = selectAccounts(await this.fetchProfiles(), this.config);
+			this.fetchedAt = new Date().toISOString();
+		} catch (thrown) {
+			error = thrown;
 		}
 		// When MagicMirror² stops during an update, report nothing and do not
 		// update again
 		if (this.stopped) {
 			return;
 		}
-		this.sendSocketNotification("PROFILES", this.state);
-		this.timer = setTimeout(() => this.update(), Number(this.config.updateInterval) || DEFAULTS.updateInterval);
+		this.report(error);
+		// After a rejected login, wait for a restart with the right password
+		if (error?.code !== "LOGIN_FAILED") {
+			this.timer = setTimeout(() => this.update(), error?.code === "NOT_REACHABLE" ? MINUTE : this.interval);
+		}
 	},
 
-	// The HTML of the family overview. Without a session, phase6 redirects to
-	// the login page instead, so log in with its form: phase6 then redirects
-	// to the family overview, or back to the login page.
-	async fetchOverview() {
-		if (!this.config.username || !this.config.password) {
-			throw new Error("No credentials configured. Set username and password in config.js.");
+	// Send the profiles of the last update that worked to the module, with the
+	// problem of this update, if any. Log a problem when it starts or changes,
+	// not after every update.
+	report(error) {
+		// Errors of Node.js have codes too, e.g. ERR_INVALID_URL
+		const hint = HINTS[error?.code];
+		const shown = error && (hint ? { code: error.code, ...error.variables } : { code: "MODULE_ERROR_UNSPECIFIED" });
+		if (error && JSON.stringify(shown) !== JSON.stringify(this.state?.error)) {
+			if (hint) {
+				Log.error(`${error.message}. ${hint}`);
+			} else {
+				Log.error("The update failed:", error);
+			}
+		} else if (!error && this.state?.error) {
+			Log.info("phase6 works again");
 		}
+		this.state = { accounts: this.accounts, fetchedAt: this.fetchedAt, error: shown };
+		this.sendSocketNotification("PROFILES", this.state);
+	},
+
+	// The profiles of the family overview. Without a session, phase6 redirects
+	// to the login page instead, so log in with its form: phase6 then redirects
+	// to the family overview, or back to the login page.
+	async fetchProfiles() {
 		let page = await this.request(OVERVIEW);
 		if (page.url.pathname === LOGIN_PAGE) {
 			page = await this.login(page);
-			if (page.url.pathname === LOGIN_PAGE) {
-				throw new Error("phase6 rejected the username or the password");
+			if (page.url.pathname !== LOGIN_PAGE && page.url.pathname !== new URL(OVERVIEW).pathname) {
+				page = await this.request(OVERVIEW);
 			}
+			// Back on the login page, also on the way to the family overview
+			if (page.url.pathname === LOGIN_PAGE) {
+				const errorCode = page.url.searchParams.get("ErrorCode");
+				throw problem("LOGIN_FAILED", {}, `phase6 rejected the login${errorCode ? ` (${errorCode})` : ""}`);
+			}
+			Log.info("Logged in to phase6");
 		}
 		if (page.url.pathname !== new URL(OVERVIEW).pathname) {
-			page = await this.request(OVERVIEW);
+			throw problem("NO_FAMILY", {}, `phase6 shows ${page.url.pathname} instead of the family overview`);
 		}
-		return page.html;
+		const profiles = parseProfiles(page.html);
+		if (profiles.length === 0) {
+			throw problem("NO_FAMILY", {}, "The family overview of phase6 shows no profiles");
+		}
+		return profiles;
 	},
 
 	// Post the form of the login page, with its hidden fields
 	login(page) {
 		const form = parseLoginForm(page.html);
 		if (!form) {
-			throw new Error("The login page of phase6 has no login form");
+			throw problem("NO_FAMILY", {}, "The login page of phase6 has no login form");
 		}
 		const fields = new URLSearchParams(form.fields);
 		fields.set("josso_username", String(this.config.username).trim());
@@ -300,7 +383,7 @@ module.exports = NodeHelper.create({
 		let next = new URL(url);
 		for (let redirects = 0; redirects <= 10; redirects++) {
 			if (next.origin !== PHASE6) {
-				throw new Error(`phase6 redirected to ${next.origin}`);
+				throw problem("NO_FAMILY", {}, `phase6 redirected to ${next.origin}`);
 			}
 			let response;
 			let html;
@@ -320,7 +403,9 @@ module.exports = NodeHelper.create({
 				// The timeout or a lost connection can also end reading the page
 				html = await response.text();
 			} catch (error) {
-				throw new Error(error.name === "TimeoutError" ? `phase6 did not answer within ${TIMEOUT / 1000} seconds` : `phase6 cannot be reached: ${error.cause?.code ?? error.message}`, { cause: error });
+				// fetch() fails with "fetch failed" and the reason as its cause
+				const detail = error.name === "TimeoutError" ? "timeout" : error.cause?.code ?? error.cause?.message ?? error.message;
+				throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
 			}
 			this.keepCookies(response);
 			const location = response.headers.get("location");
@@ -333,11 +418,16 @@ module.exports = NodeHelper.create({
 				continue;
 			}
 			if (!response.ok) {
-				throw new Error(`phase6 answered with HTTP ${response.status}`);
+				const detail = `HTTP ${response.status}`;
+				// phase6 is down, asks for fewer requests, or does not have the page
+				if (response.status >= 500) {
+					throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
+				}
+				throw problem(response.status === 429 ? "MODULE_ERROR_RATE_LIMITED" : "NO_FAMILY", {}, `phase6 answered ${next.pathname} with ${detail}`);
 			}
 			return { url: next, html };
 		}
-		throw new Error("phase6 redirected too often");
+		throw problem("NO_FAMILY", {}, "phase6 redirected too often");
 	},
 
 	// Keep the cookies that a response sets, and forget those it deletes,

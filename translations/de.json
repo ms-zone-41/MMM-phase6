@@ -1,0 +1,11 @@
+{
+	"LAST_LEARNED": "Zuletzt",
+	"DUE": "Fällig",
+	"STREAK": "Serie",
+	"NO_PROFILES": "Keine Profile anzuzeigen",
+	"UPDATED": "Stand: {time}",
+	"NO_CREDENTIALS": "{name} fehlt in {file}",
+	"LOGIN_FAILED": "phase6 hat den Login abgelehnt: Benutzername und Passwort prüfen, dann MagicMirror² neu starten",
+	"NOT_REACHABLE": "phase6 ist nicht erreichbar ({detail})",
+	"NO_FAMILY": "phase6 zeigt keine Familienmitglieder: Ist das der Login der Eltern?"
+}
