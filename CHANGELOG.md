@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 2.0.2 - 2026-10-12
+
+### Fixed
+
+- Every name and its due words were bright, also with no words due, and a name was bold while words were due. A name and its due words are now bright only while words are due, the other rows have the normal text color, and nothing is bold
+
 ## 2.0.1 - 2026-10-12
 
 ### Fixed

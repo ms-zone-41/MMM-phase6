@@ -1,6 +1,6 @@
 {
   "name": "mmm-phase6",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "A MagicMirror² module that shows how your children are doing on phase6: when they last learned, how many words are due, and their streak.",
   "repository": {
     "type": "git",
