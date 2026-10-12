@@ -2,9 +2,11 @@
   border-collapse: collapse;
 }
 
+/* The rows as far apart as those of other tables, e.g. of the calendar,
+   whose cells have 1px above and below them */
 .MMM-phase6 .p6-profiles th,
 .MMM-phase6 .p6-profiles td {
-  padding: 0 0 0.2em 1em;
+  padding: 0 0 2px 1em;
   text-align: left;
 }
 
