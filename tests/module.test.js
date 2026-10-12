@@ -95,6 +95,11 @@ function warning(dom) {
 	return dom.querySelector(".p6-warning")?.textContent ?? null;
 }
 
+// The texts that are bright
+function bright(dom) {
+	return Array.from(dom.querySelectorAll(".bright"), (element) => element.textContent);
+}
+
 test("asks the node helper for the profiles when it starts, without options", () => {
 	assert.deepEqual(createModule().socketNotifications, [{ notification: "GET_PROFILES", payload: undefined }]);
 });
@@ -135,6 +140,10 @@ test("shows another text of phase6 as it is", () => {
 	assert.deepEqual(dates([{ ...EMMA, lastLearned: "Heute, 15:25" }], "de"), ["Heute, 15:25"]);
 });
 
+test("shows the names and the due vocabulary bright", () => {
+	assert.deepEqual(bright(receive(createModule(), [EMMA, NOAH])), ["Emma", "29", "Noah", "0"]);
+});
+
 test("makes the names of the profiles with due vocabulary bold", () => {
 	const dom = receive(createModule(), [EMMA, NOAH]);
 	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => row.classList.contains("p6-has-due")), [false, true, false]);
@@ -144,7 +153,7 @@ test("gives the cells of each column the same class, also the header", () => {
 	const dom = receive(createModule(), [EMMA]);
 	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => Array.from(row.children, (cell) => `${cell.tagName} ${cell.className}`)), [
 		["TH p6-name", "TH p6-last", "TH p6-due", "TH p6-streak"],
-		["TD p6-name", "TD p6-last", "TD p6-due", "TD p6-streak"]
+		["TD p6-name bright", "TD p6-last", "TD p6-due bright", "TD p6-streak"]
 	]);
 });
 
@@ -154,12 +163,19 @@ test("shows a problem without a table if no update has worked yet", () => {
 	assert.equal(dom.querySelector("table"), null);
 });
 
-test("shows a problem above the profiles of the last update that worked, dimmed", () => {
-	const dom = receive(createModule(), [EMMA, NOAH], { code: "NOT_REACHABLE", detail: "HTTP 503" });
+test("shows a problem above the profiles of the last update that worked, dimmed until an update works", () => {
+	const module = createModule();
+	const dom = receive(module, [EMMA, NOAH], { code: "NOT_REACHABLE", detail: "HTTP 503" });
 	assert.equal(warning(dom), "phase6 is not reachable (HTTP 503)");
-	assert.deepEqual(Array.from(dom.children, (element) => element.className), ["p6-warning", "p6-profiles p6-stale"]);
+	assert.deepEqual(Array.from(dom.children, (element) => element.className), ["p6-warning", "p6-profiles p6-stale dimmed"]);
 	assert.equal(rows(dom).length, 3);
-	assert.ok(!receive(createModule(), [EMMA, NOAH]).querySelector("table").classList.contains("p6-stale"));
+	// Nothing bright, but a name stays bold while vocabulary is due
+	assert.deepEqual(bright(dom), []);
+	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => row.classList.contains("p6-has-due")), [false, true, false]);
+	const again = receive(module, [EMMA, NOAH]);
+	assert.equal(warning(again), null);
+	assert.equal(again.querySelector("table").className, "p6-profiles");
+	assert.deepEqual(bright(again), ["Emma", "29", "Noah", "0"]);
 });
 
 test("shows only the problem if no profile matches", () => {

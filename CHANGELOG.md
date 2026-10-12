@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- While a message showed, the profiles of the last update that worked faded to half their brightness, so the dates and the column headers were hard to read. They are now dimmed
+
 ## 2.0.0 - 2026-10-11
 
 A rewrite, which changes the configuration. To upgrade, update MagicMirror² to 2.38.0 or newer, run `git pull` in the module directory, change the configuration as below, and restart MagicMirror². The module no longer needs its `node_modules` directory, so you can delete it.

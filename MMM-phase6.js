@@ -74,12 +74,18 @@ Module.register("MMM-phase6", {
 	getTable() {
 		const table = document.createElement("table");
 		// While the problem lasts, the profiles are those of the last update
-		// that worked
-		table.className = this.error ? "p6-profiles p6-stale" : "p6-profiles";
+		// that worked: dimmed, as phase6 may show other numbers by now. The
+		// class p6-stale lets custom.css style them.
+		const stale = Boolean(this.error);
+		table.className = stale ? "p6-profiles p6-stale dimmed" : "p6-profiles";
 		table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
 		for (const profile of this.profiles) {
 			const row = this.getRow("td", [profile.name, this.formatDate(profile.lastLearned), String(profile.due), String(profile.streak)]);
-			// Bold while vocabulary is due
+			// The name and the due vocabulary bright, unless they are stale
+			if (!stale) {
+				row.querySelectorAll(".p6-name, .p6-due").forEach((cell) => cell.classList.add("bright"));
+			}
+			// Bold while vocabulary is due, also while stale
 			if (profile.due > 0) {
 				row.classList.add("p6-has-due");
 			}
