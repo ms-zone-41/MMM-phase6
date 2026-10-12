@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 2.0.1 - 2026-10-12
+
 ### Fixed
 
 - While a message showed, the profiles of the last update that worked faded to half their brightness, so the dates and the column headers were hard to read. They are now dimmed
-- A name in `profiles` or `dueAdjustments` that matches no profile dimmed the profiles below its message, although they were up to date
+- A name in `profiles` or `dueAdjustments` that matches no profile faded the profiles below its message too, although they were up to date
 - A long message widened its region, e.g. the left column into the center one, and stretched the other modules in it. It now wraps at the width of the region
 - The rows were further apart than those of the calendar and of other modules
 
