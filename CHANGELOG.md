@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - While a message showed, the profiles of the last update that worked faded to half their brightness, so the dates and the column headers were hard to read. They are now dimmed
+- A name in `profiles` or `dueAdjustments` that matches no profile dimmed the profiles below its message, although they were up to date
 
 ## 2.0.0 - 2026-10-11
 

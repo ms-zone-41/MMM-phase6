@@ -184,6 +184,13 @@ test("shows only the problem if no profile matches", () => {
 	assert.equal(dom.querySelector("table"), null);
 });
 
+test("does not dim the profiles below a name that matches no profile, as they are up to date", () => {
+	const dom = receive(createModule(), [EMMA], { code: "UNKNOWN_PROFILE", name: "Ben", names: "Lena, Emma, Noah" });
+	assert.equal(warning(dom), "phase6 has no profile Ben. Profiles: Lena, Emma, Noah");
+	assert.equal(dom.querySelector("table").className, "p6-profiles");
+	assert.deepEqual(bright(dom), ["Emma", "29"]);
+});
+
 test("fills in the variables of a problem", () => {
 	assert.equal(warning(receive(createModule("de"), null, { code: "NO_CREDENTIALS", name: "SECRET_PHASE6_PASSWORD", file: "config/config.env" })), "SECRET_PHASE6_PASSWORD fehlt in config/config.env");
 });

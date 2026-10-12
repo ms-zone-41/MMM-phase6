@@ -75,8 +75,9 @@ Module.register("MMM-phase6", {
 		const table = document.createElement("table");
 		// While the problem lasts, the profiles are those of the last update
 		// that worked: dimmed, as phase6 may show other numbers by now. The
-		// class p6-stale lets custom.css style them.
-		const stale = Boolean(this.error);
+		// class p6-stale lets custom.css style them. A name in the options
+		// that matches no profile comes with the profiles of this update.
+		const stale = Boolean(this.error) && this.error.code !== "UNKNOWN_PROFILE";
 		table.className = stale ? "p6-profiles p6-stale dimmed" : "p6-profiles";
 		table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
 		for (const profile of this.profiles) {

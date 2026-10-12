@@ -63,7 +63,7 @@ To hide a column, add a rule to `config/custom.css`, e.g. `.MMM-phase6 .p6-strea
 
 ## Messages
 
-The module shows a message above the profiles when something is wrong, and the log of MagicMirror² says more. While a message shows, the profiles of the last update that worked stay, dimmed. After a change of the configuration, restart MagicMirror².
+The module shows a message above the profiles when something is wrong, and the log of MagicMirror² says more. When an update fails, the profiles of the last update that worked stay, dimmed. After a change of the configuration, restart MagicMirror².
 
 | Message | What to do |
 | --- | --- |
