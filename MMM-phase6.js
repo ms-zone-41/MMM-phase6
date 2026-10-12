@@ -82,24 +82,23 @@ Module.register("MMM-phase6", {
 		table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
 		for (const profile of this.profiles) {
 			const row = this.getRow("td", [profile.name, this.formatDate(profile.lastLearned), String(profile.due), String(profile.streak)]);
-			// The name and the due vocabulary bright, unless they are stale
-			if (!stale) {
+			// The name and the due vocabulary bright while vocabulary is due,
+			// unless they are stale; otherwise they have the color of the table
+			if (profile.due > 0 && !stale) {
 				row.querySelectorAll(".p6-name, .p6-due").forEach((cell) => cell.classList.add("bright"));
-			}
-			// Bold while vocabulary is due, also while stale
-			if (profile.due > 0) {
-				row.classList.add("p6-has-due");
 			}
 			table.append(row);
 		}
 		return table;
 	},
 
+	// A row of the headers of the columns (th), small and dimmed, or of a
+	// profile (td)
 	getRow(tag, texts) {
 		const row = document.createElement("tr");
 		["p6-name", "p6-last", "p6-due", "p6-streak"].forEach((className, index) => {
 			const cell = document.createElement(tag);
-			cell.className = className;
+			cell.className = tag === "th" ? `${className} xsmall dimmed` : className;
 			// As text, not as HTML
 			cell.textContent = texts[index];
 			row.append(cell);

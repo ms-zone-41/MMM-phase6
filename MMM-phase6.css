@@ -19,17 +19,11 @@
   text-align: right;
 }
 
-/* The headers of the columns, like the header of a module */
+/* The headers of the columns in capitals like the header of a module, and
+   not bold like other th */
 .MMM-phase6 .p6-profiles th {
-  color: var(--color-text-dimmed);
-  font-size: var(--font-size-xsmall);
   font-weight: normal;
   text-transform: uppercase;
-}
-
-/* A name, bold while vocabulary is due */
-.MMM-phase6 .p6-has-due .p6-name {
-  font-weight: bold;
 }
 
 /* The problem wraps at the width of the region instead of widening it, but

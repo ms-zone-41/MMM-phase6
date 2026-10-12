@@ -140,19 +140,19 @@ test("shows another text of phase6 as it is", () => {
 	assert.deepEqual(dates([{ ...EMMA, lastLearned: "Heute, 15:25" }], "de"), ["Heute, 15:25"]);
 });
 
-test("shows the names and the due vocabulary bright", () => {
-	assert.deepEqual(bright(receive(createModule(), [EMMA, NOAH])), ["Emma", "29", "Noah", "0"]);
-});
-
-test("makes the names of the profiles with due vocabulary bold", () => {
+test("shows the name and the due vocabulary bright only while vocabulary is due", () => {
 	const dom = receive(createModule(), [EMMA, NOAH]);
-	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => row.classList.contains("p6-has-due")), [false, true, false]);
+	assert.deepEqual(bright(dom), ["Emma", "29"]);
+	// Otherwise in the normal text color of the table, and the rows have no
+	// class of their own, e.g. none for a bold name
+	assert.equal(dom.querySelectorAll("td.normal, td.dimmed").length, 0);
+	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => row.className), ["", "", ""]);
 });
 
 test("gives the cells of each column the same class, also the header", () => {
 	const dom = receive(createModule(), [EMMA]);
 	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => Array.from(row.children, (cell) => `${cell.tagName} ${cell.className}`)), [
-		["TH p6-name", "TH p6-last", "TH p6-due", "TH p6-streak"],
+		["TH p6-name xsmall dimmed", "TH p6-last xsmall dimmed", "TH p6-due xsmall dimmed", "TH p6-streak xsmall dimmed"],
 		["TD p6-name bright", "TD p6-last", "TD p6-due bright", "TD p6-streak"]
 	]);
 });
@@ -169,13 +169,12 @@ test("shows a problem above the profiles of the last update that worked, dimmed 
 	assert.equal(warning(dom), "phase6 is not reachable (HTTP 503)");
 	assert.deepEqual(Array.from(dom.children, (element) => element.className), ["p6-warning", "p6-profiles p6-stale dimmed"]);
 	assert.equal(rows(dom).length, 3);
-	// Nothing bright, but a name stays bold while vocabulary is due
+	// Nothing bright, also while vocabulary is due
 	assert.deepEqual(bright(dom), []);
-	assert.deepEqual(Array.from(dom.querySelectorAll("tr"), (row) => row.classList.contains("p6-has-due")), [false, true, false]);
 	const again = receive(module, [EMMA, NOAH]);
 	assert.equal(warning(again), null);
 	assert.equal(again.querySelector("table").className, "p6-profiles");
-	assert.deepEqual(bright(again), ["Emma", "29", "Noah", "0"]);
+	assert.deepEqual(bright(again), ["Emma", "29"]);
 });
 
 test("shows only the problem if no profile matches", () => {
