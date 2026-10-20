@@ -166,7 +166,7 @@ const DEFAULTS = {
 // What the log adds about each problem: what to do
 const HINTS = {
 	NO_CREDENTIALS: "Add it, then restart MagicMirror². See the README.",
-	LOGIN_FAILED: "Check the username and the password by logging in at https://www.phase-6.de, correct them, then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
+	LOGIN_FAILED: "Log in at https://www.phase-6.de with the same login. If it works, phase6 had a problem; if it keeps failing, correct the username or the password. Then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
 	LOGIN_RETRY: "phase6 may also reject a correct login while it has a problem. If the password has changed on phase6, correct it, then restart MagicMirror².",
 	NOT_REACHABLE: "The module tries again in a minute.",
 	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",

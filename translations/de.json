@@ -3,7 +3,7 @@
 	"DUE": "Fällig",
 	"STREAK": "Serie",
 	"NO_CREDENTIALS": "{name} fehlt in {file}",
-	"LOGIN_FAILED": "phase6 hat den Login abgelehnt: Benutzername und Passwort prüfen, dann MagicMirror² neu starten",
+	"LOGIN_FAILED": "phase6 hat den Login abgelehnt: Login auf phase-6.de prüfen, dann MagicMirror² neu starten",
 	"LOGIN_RETRY": "phase6 lehnt den Login gerade ab (nächster Versuch um {time})",
 	"NOT_REACHABLE": "phase6 ist nicht erreichbar ({detail})",
 	"NO_FAMILY": "phase6 zeigt keine Familienmitglieder: Ist das der Login der Eltern?",

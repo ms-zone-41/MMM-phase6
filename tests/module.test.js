@@ -159,7 +159,7 @@ test("gives the cells of each column the same class, also the header", () => {
 
 test("shows a problem without a table if no update has worked yet", () => {
 	const dom = receive(createModule("de"), null, { code: "LOGIN_FAILED" });
-	assert.equal(warning(dom), "phase6 hat den Login abgelehnt: Benutzername und Passwort prüfen, dann MagicMirror² neu starten");
+	assert.equal(warning(dom), "phase6 hat den Login abgelehnt: Login auf phase-6.de prüfen, dann MagicMirror² neu starten");
 	assert.equal(dom.querySelector("table"), null);
 });
 

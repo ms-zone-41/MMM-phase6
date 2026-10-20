@@ -316,7 +316,7 @@ test("reports a first login that phase6 rejects, and does not try again", async 
 	assert.equal(site.requests.filter(({ method }) => method === "POST").length, 1);
 	assert.equal(timers.size, 0);
 	assert.equal(logs.length, 1);
-	assert.match(logs[0], /^error: phase6 rejected the login \(user\.login\.wrong\)\. Check the username and the password .* restart MagicMirror²/);
+	assert.match(logs[0], /^error: phase6 rejected the login \(user\.login\.wrong\)\. Log in at https:\/\/www\.phase-6\.de with the same login\. .* restart MagicMirror²/);
 	assert.doesNotMatch(logs[0], /Hund123/);
 });
 

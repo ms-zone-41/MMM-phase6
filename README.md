@@ -68,7 +68,7 @@ The module shows a message above the profiles when something is wrong, and the l
 | Message | What to do |
 | --- | --- |
 | … is missing in … | Add the login, see [Configuration](#configuration). |
-| phase6 rejected the login | Check the login at [phase-6.de](https://www.phase-6.de) and correct it. Until MagicMirror² restarts, the module does not try again, so that phase6 does not lock the account. |
+| phase6 rejected the login | Log in at [phase-6.de](https://www.phase-6.de) with the same login. If it works, phase6 had a problem; if it keeps failing, correct the login, see [Configuration](#configuration). Then restart MagicMirror²: until then, the module does not try again, so that phase6 does not lock the account. |
 | phase6 is rejecting the login | Nothing: while phase6 has a problem, it may also reject a correct login. As the login worked before, the module tries again after 30 minutes and after 4 more hours, then waits for a restart, so that phase6 does not lock the account. If you have changed the password on phase6, correct it, then restart MagicMirror². |
 | phase6 is not reachable | Nothing: the module tries again every minute. If the message stays, check the internet connection of the mirror. |
 | phase6 shows no family members | Use the login of the parent, see [Configuration](#configuration). If you do, phase6 may have changed its website: [update](#update) the module, or [report it](https://github.com/ms-zone-41/MMM-phase6/issues). |
