@@ -11,8 +11,16 @@ const { fakePhase6, OVERVIEW, LOGIN_PAGE } = require("./fake-phase6.js");
 // The options of the module in config.js
 const CONFIG = { username: "parent@example.com", password: "secret" };
 
-// Load the node helper with stand-ins for MagicMirror², for fetch() and for
-// the timers, and start it with the given options of config.js
+// The clock of the node helper stands still on 19 October 2026 at 01:51
+const NOW = new Date(2026, 9, 19, 1, 51).getTime();
+class FixedDate extends Date {
+	static now() {
+		return NOW;
+	}
+}
+
+// Load the node helper with stand-ins for MagicMirror², for fetch(), for the
+// clock and for the timers, and start it with the given options of config.js
 function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 	const timers = new Set();
 	const notifications = [];
@@ -29,6 +37,7 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		URL,
 		URLSearchParams,
 		AbortSignal,
+		Date: FixedDate,
 		setTimeout: (callback, delay) => {
 			const timer = { callback, delay };
 			timers.add(timer);
@@ -86,6 +95,12 @@ async function sent(config, overview = OVERVIEW) {
 function parse(overview) {
 	const { context } = createHelper({ config: {} });
 	return JSON.parse(JSON.stringify(context.parseProfiles(overview)));
+}
+
+// phase6 while it has a problem with the login: it sends every login, also a
+// correct one, back to the login page with the ErrorCode user.login.wrong
+function rejectLogins(url) {
+	return new URL(url).pathname === "/session/login-web" ? new Response(null, { status: 302, headers: { location: "/classic/service/user/login.html?ErrorCode=user.login.wrong" } }) : null;
 }
 
 // What the node helper reports when phase6 answers with failure()
@@ -284,7 +299,7 @@ test("reports a variable of config/config.env that is not set", async () => {
 	assert.match(logs[0], /^error: config\.js uses \$\{SECRET_PHASE6_PASSWORD\} as the password, but config\/config\.env does not set SECRET_PHASE6_PASSWORD\./);
 });
 
-test("reports a login that phase6 rejects with a page of its own, and does not try again", async () => {
+test("reports a first login that phase6 rejects with a page of its own, and does not try again", async () => {
 	const site = fakePhase6();
 	site.fail((url) => (new URL(url).pathname === "/session/login-web" ? new Response("Benutzername oder Passwort falsch") : null));
 	const { timers, notifications, logs } = createHelper({ site });
@@ -294,7 +309,7 @@ test("reports a login that phase6 rejects with a page of its own, and does not t
 	assert.ok(!logs.includes("info: Logged in to phase6"));
 });
 
-test("reports a login that phase6 rejects, and does not try again", async () => {
+test("reports a first login that phase6 rejects, and does not try again", async () => {
 	const { site, timers, notifications, logs } = createHelper({ config: { ...CONFIG, password: "Hund123" } });
 	await settle();
 	assert.deepEqual(last(notifications), { profiles: null, error: { code: "LOGIN_FAILED" } });
@@ -303,6 +318,127 @@ test("reports a login that phase6 rejects, and does not try again", async () => 
 	assert.equal(logs.length, 1);
 	assert.match(logs[0], /^error: phase6 rejected the login \(user\.login\.wrong\)\. Check the username and the password .* restart MagicMirror²/);
 	assert.doesNotMatch(logs[0], /Hund123/);
+});
+
+test("tries a login that worked before again in 30 minutes, as phase6 may also reject a correct login while it has a problem", async () => {
+	const { site, timers, notifications, logs } = createHelper();
+	await settle();
+	const { profiles } = last(notifications);
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	assert.deepEqual(last(notifications), { profiles, error: { code: "LOGIN_RETRY", time: NOW + 30 * 60 * 1000 } });
+	assert.deepEqual([...timers].map(({ delay }) => delay), [30 * 60 * 1000]);
+	assert.equal(logs.at(-1), "error: phase6 rejected the login (user.login.wrong), which worked before. The module tries again at 02:21. phase6 may also reject a correct login while it has a problem. If the password has changed on phase6, correct it, then restart MagicMirror².");
+	site.fail(null);
+	await updateAgain(timers);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+	assert.deepEqual(logs.slice(-2), ["info: Logged in to phase6", "info: phase6 works again"]);
+});
+
+test("tries a login that worked before again after 30 minutes and 4 hours, then waits for a restart, so that phase6 does not lock the account", async () => {
+	const { site, timers, notifications, logs } = createHelper();
+	await settle();
+	// e.g. after the password has changed on phase6
+	site.expire();
+	site.fail(rejectLogins);
+	const requests = site.requests.length;
+	const delays = [];
+	for (let update = 0; update < 2; update++) {
+		await updateAgain(timers);
+		assert.equal(last(notifications).error.code, "LOGIN_RETRY");
+		delays.push(...[...timers].map(({ delay }) => delay));
+	}
+	assert.deepEqual(delays, [30 * 60 * 1000, 4 * 60 * 60 * 1000]);
+	await updateAgain(timers);
+	assert.deepEqual(last(notifications).error, { code: "LOGIN_FAILED" });
+	assert.equal(timers.size, 0);
+	assert.equal(site.requests.slice(requests).filter(({ method }) => method === "POST").length, 3);
+	// Each rejection once, with the time of the next try
+	assert.deepEqual(logs.slice(1).map((line) => /tries again at \d\d:\d\d|does not try again/.exec(line)?.[0]), ["tries again at 02:21", "tries again at 05:51", "does not try again"]);
+});
+
+test("tries a rejected login again after each login that worked", async () => {
+	const { site, timers } = createHelper();
+	await settle();
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	await updateAgain(timers);
+	assert.deepEqual([...timers].map(({ delay }) => delay), [4 * 60 * 60 * 1000]);
+	site.fail(null);
+	await updateAgain(timers);
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	assert.deepEqual([...timers].map(({ delay }) => delay), [30 * 60 * 1000]);
+});
+
+test("keeps counting the rejected logins while phase6 is not reachable in between", async () => {
+	const { site, timers, notifications } = createHelper();
+	await settle();
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	site.fail(() => new Response("", { status: 503 }));
+	await updateAgain(timers);
+	assert.deepEqual(last(notifications).error, { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	assert.deepEqual([...timers].map(({ delay }) => delay), [4 * 60 * 60 * 1000]);
+});
+
+test("tries a rejected login again also after a login that worked although the page after it did not come", async () => {
+	// phase6 accepts the first login, but the page after it does not come,
+	// so the next update reads the family overview through the session of
+	// that login, without a login of its own
+	const site = fakePhase6();
+	site.fail((url) => {
+		if (new URL(url).pathname === "/classic/service/user/login-redirect-on-success.jsp") {
+			throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+		}
+		return null;
+	});
+	const { timers, notifications } = createHelper({ site });
+	await settle();
+	assert.equal(last(notifications).error.code, "NOT_REACHABLE");
+	site.fail(null);
+	await updateAgain(timers);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	assert.equal(last(notifications).error.code, "LOGIN_RETRY");
+	assert.deepEqual([...timers].map(({ delay }) => delay), [30 * 60 * 1000]);
+});
+
+test("tries a rejected login again without the cookies of the rejected one, like after a restart", async () => {
+	const { site, timers } = createHelper();
+	await settle();
+	site.expire();
+	site.fail(rejectLogins);
+	await updateAgain(timers);
+	const requests = site.requests.length;
+	site.fail(null);
+	await updateAgain(timers);
+	assert.deepEqual(site.requests[requests].cookies, {});
+});
+
+test("counts a rejected login without loading the login page it leads to, which may not come while phase6 is slow", async () => {
+	const { site, timers, notifications } = createHelper();
+	await settle();
+	site.expire();
+	site.fail((url) => {
+		if (new URL(url).searchParams.has("ErrorCode")) {
+			throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+		}
+		return rejectLogins(url);
+	});
+	await updateAgain(timers);
+	assert.equal(last(notifications).error.code, "LOGIN_RETRY");
+	assert.ok(site.requests.every(({ path }) => !path.includes("ErrorCode")));
 });
 
 test("reports that phase6 is not reachable: no connection, a timeout or an error of phase6", async () => {

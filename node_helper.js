@@ -144,6 +144,13 @@ const TIMEOUT = 30 * 1000;
 // The shortest time between two updates, and the time until the next try
 // while phase6 is not reachable, in milliseconds
 const MINUTE = 60 * 1000;
+// The times until the next try after phase6 has rejected a login that
+// worked before, one for each rejection in a row, in milliseconds. Then the
+// module waits for a restart. So it posts a login that phase6 rejects, e.g.
+// after the password has changed on phase6, at most three times in a row:
+// when phase6 locks an account is unknown. A login that phase6 does not
+// answer, e.g. after a timeout, counts as not reachable, as before.
+const RETRIES = [30 * MINUTE, 4 * 60 * MINUTE];
 
 // The options of the node helper and their defaults. It reads them from
 // config.js only: any device that the ipWhitelist of MagicMirror² lets in can
@@ -160,6 +167,7 @@ const DEFAULTS = {
 const HINTS = {
 	NO_CREDENTIALS: "Add it, then restart MagicMirror². See the README.",
 	LOGIN_FAILED: "Check the username and the password by logging in at https://www.phase-6.de, correct them, then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
+	LOGIN_RETRY: "phase6 may also reject a correct login while it has a problem. If the password has changed on phase6, correct it, then restart MagicMirror².",
 	NOT_REACHABLE: "The module tries again in a minute.",
 	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",
 	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues.",
@@ -184,6 +192,9 @@ module.exports = NodeHelper.create({
 		// Nothing to send until the first update has finished
 		this.state = null;
 		this.profiles = null;
+		// The times until the tries that remain after a rejected login: none
+		// before a login has worked, see update()
+		this.retries = [];
 		// An updateInterval in seconds or in minutes would load phase6 again and
 		// again
 		const interval = Number(this.config.updateInterval) || DEFAULTS.updateInterval;
@@ -235,6 +246,11 @@ module.exports = NodeHelper.create({
 		let error = null;
 		try {
 			const profiles = await this.fetchProfiles();
+			// phase6 has accepted the login since the start: the cookies start
+			// empty, and only a login of this run gives a session. So if phase6
+			// rejects it later, phase6 more likely has a problem than the
+			// password has changed.
+			this.retries = [...RETRIES];
 			const { shown, unknown } = selectProfiles(profiles, this.config);
 			this.profiles = shown;
 			if (unknown.length > 0) {
@@ -249,10 +265,24 @@ module.exports = NodeHelper.create({
 		if (this.stopped) {
 			return;
 		}
+		let delay = error?.code === "NOT_REACHABLE" ? MINUTE : this.interval;
+		if (error?.code === "LOGIN_FAILED") {
+			// phase6 may also reject a correct login while it has a problem, with
+			// the same ErrorCode. So after a login that worked, try again a few
+			// times, later each time. After a rejected first login, which is
+			// more likely wrong in the configuration, and after the last try,
+			// wait for a restart with the right password.
+			delay = this.retries.shift();
+			if (delay) {
+				const time = Date.now() + delay;
+				// In the local time of the log, e.g. 02:21
+				const clock = new Date(time).toTimeString().slice(0, 5);
+				error = problem("LOGIN_RETRY", { time }, `${error.message}, which worked before. The module tries again at ${clock}`);
+			}
+		}
 		this.report(error);
-		// After a rejected login, wait for a restart with the right password
-		if (error?.code !== "LOGIN_FAILED") {
-			this.timer = setTimeout(() => this.update(), error?.code === "NOT_REACHABLE" ? MINUTE : this.interval);
+		if (delay) {
+			this.timer = setTimeout(() => this.update(), delay);
 		}
 	},
 
@@ -289,6 +319,9 @@ module.exports = NodeHelper.create({
 			// Back on the login page, also on the way to the family overview
 			if (page.url.pathname === LOGIN_PAGE) {
 				const errorCode = page.url.searchParams.get("ErrorCode");
+				// The next login starts without the cookies of this one, like
+				// after a restart
+				this.cookies.clear();
 				throw problem("LOGIN_FAILED", {}, `phase6 rejected the login${errorCode ? ` (${errorCode})` : ""}`);
 			}
 			Log.info("Logged in to phase6");
@@ -312,17 +345,22 @@ module.exports = NodeHelper.create({
 		const fields = new URLSearchParams(form.fields);
 		fields.set("josso_username", String(this.config.username).trim());
 		fields.set("josso_password", String(this.config.password));
+		// phase6 sends a rejected login back to the login page, with the
+		// ErrorCode in its URL. That redirect is the answer, so do not load the
+		// page, which may not come while phase6 is slow.
 		return this.request(new URL(form.action || page.url, page.url), {
 			method: "POST",
 			body: fields,
-			headers: { Origin: PHASE6, Referer: page.url.href }
+			headers: { Origin: PHASE6, Referer: page.url.href },
+			until: LOGIN_PAGE
 		});
 	},
 
 	// Fetch a page of phase6 with the cookies of the session, and follow the
 	// redirects: fetch() keeps no cookies, and phase6 sets those of the
-	// session in redirects
-	async request(url, { method = "GET", body, headers } = {}) {
+	// session in redirects. A redirect to the path until ends the request,
+	// without loading that page.
+	async request(url, { method = "GET", body, headers, until } = {}) {
 		let next = new URL(url);
 		for (let redirects = 0; redirects <= 10; redirects++) {
 			if (next.origin !== PHASE6) {
@@ -355,6 +393,9 @@ module.exports = NodeHelper.create({
 			if (response.status >= 300 && response.status < 400 && location) {
 				// Like a browser, follow the redirect with GET
 				next = new URL(location, next);
+				if (next.origin === PHASE6 && next.pathname === until) {
+					return { url: next, html: "" };
+				}
 				method = "GET";
 				body = undefined;
 				headers = undefined;

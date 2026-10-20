@@ -4,6 +4,7 @@
 	"STREAK": "Streak",
 	"NO_CREDENTIALS": "{name} is missing in {file}",
 	"LOGIN_FAILED": "phase6 rejected the login: check username and password, then restart MagicMirror²",
+	"LOGIN_RETRY": "phase6 is rejecting the login (next try at {time})",
 	"NOT_REACHABLE": "phase6 is not reachable ({detail})",
 	"NO_FAMILY": "phase6 shows no family members: is this the parent's login?",
 	"UNKNOWN_PROFILE": "phase6 has no profile {name}. Profiles: {names}"

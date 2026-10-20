@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- While phase6 had a problem, it also rejected a correct login, and the module showed the old profiles until MagicMirror² restarted. If the login has worked since MagicMirror² started, the module now tries again after 30 minutes, then after 4 more hours, and shows the time of the next try. Then it waits for a restart, so that phase6 does not lock the account
+
 ## 2.0.2 - 2026-10-12
 
 ### Fixed

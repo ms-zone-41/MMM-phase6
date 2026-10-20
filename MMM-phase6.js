@@ -59,7 +59,10 @@ Module.register("MMM-phase6", {
 			warning.className = "p6-warning";
 			const icon = document.createElement("i");
 			icon.className = "fa-solid fa-triangle-exclamation";
-			warning.append(icon, this.translate(this.error.code, this.error));
+			// The node helper sends the time of the next try, if any, in
+			// milliseconds
+			const variables = this.error.time ? { ...this.error, time: this.formatTime(this.error.time) } : this.error;
+			warning.append(icon, this.translate(this.error.code, variables));
 			wrapper.append(warning);
 		}
 		if (this.profiles?.length > 0) {
@@ -133,5 +136,12 @@ Module.register("MMM-phase6", {
 			month: "2-digit",
 			year: date.getFullYear() === today.getFullYear() ? undefined : "numeric"
 		});
+	},
+
+	// A time in the language and the time format of MagicMirror², like the
+	// clock, e.g. 14:05, or 2:05 PM with a timeFormat of 12
+	formatTime(time) {
+		const twelve = config.timeFormat === 12;
+		return new Date(time).toLocaleTimeString(config.language, { hour: twelve ? "numeric" : "2-digit", minute: "2-digit", hourCycle: twelve ? "h12" : "h23" });
 	}
 });

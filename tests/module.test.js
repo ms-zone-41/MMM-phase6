@@ -47,10 +47,10 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../MMM-phase6.js"), "ut
 const EMMA = { name: "Emma", lastLearned: "2026-10-10T15:25", due: 29, streak: 28 };
 const NOAH = { name: "Noah", lastLearned: "2026-10-09T07:09", due: 0, streak: 3 };
 
-// Start the module in a mirror with the given language and locale, with
-// stand-ins for the methods of MagicMirror²
-function createModule(language = "en", locale = undefined) {
-	Object.assign(globalConfig, { language, locale });
+// Start the module in a mirror with the given language, locale and
+// timeFormat, with stand-ins for the methods of MagicMirror²
+function createModule(language = "en", locale = undefined, timeFormat = 24) {
+	Object.assign(globalConfig, { language, locale, timeFormat });
 	const module = Object.assign(Object.create(definition), {
 		name: "MMM-phase6",
 		config: { ...definition.defaults },
@@ -194,9 +194,19 @@ test("fills in the variables of a problem", () => {
 	assert.equal(warning(receive(createModule("de"), null, { code: "NO_CREDENTIALS", name: "SECRET_PHASE6_PASSWORD", file: "config/config.env" })), "SECRET_PHASE6_PASSWORD fehlt in config/config.env");
 });
 
+test("shows the time of the next try in the language and the time format of the mirror, above the dimmed profiles", () => {
+	const error = { code: "LOGIN_RETRY", time: new Date(2026, 9, 11, 0, 5).getTime() };
+	const dom = receive(createModule("de"), [EMMA, NOAH], error);
+	assert.equal(warning(dom), "phase6 lehnt den Login gerade ab (nächster Versuch um 00:05)");
+	assert.equal(dom.querySelector("table").className, "p6-profiles p6-stale dimmed");
+	assert.equal(warning(receive(createModule("en"), [EMMA], error)), "phase6 is rejecting the login (next try at 00:05)");
+	// Some versions of Node.js put a narrow space before AM
+	assert.equal(warning(receive(createModule("en", undefined, 12), [EMMA], error)).replace(/\s/g, " "), "phase6 is rejecting the login (next try at 12:05 AM)");
+});
+
 test("has a message for each problem of the node helper, in each language", () => {
 	for (const language of ["en", "de"]) {
-		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "NOT_REACHABLE", "NO_FAMILY", "UNKNOWN_PROFILE"]) {
+		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "LOGIN_RETRY", "NOT_REACHABLE", "NO_FAMILY", "UNKNOWN_PROFILE"]) {
 			assert.ok(TRANSLATIONS[language][code], `${language}: ${code}`);
 		}
 	}
