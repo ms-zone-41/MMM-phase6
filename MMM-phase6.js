@@ -39,7 +39,8 @@ Module.register("MMM-phase6", {
 		};
 	},
 
-	// The node helper sends the profiles after each update
+	// The node helper sends the profiles after each update, and when the
+	// browser connects
 	socketNotificationReceived(notification, payload) {
 		if (notification === "PROFILES") {
 			this.profiles = payload.profiles;

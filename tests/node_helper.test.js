@@ -23,6 +23,8 @@ class FixedDate extends Date {
 // clock and for the timers, and start it with the given options of config.js
 function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 	const timers = new Set();
+	// The handlers for browsers that connect to the node helper
+	const connections = [];
 	const notifications = [];
 	const logs = [];
 	const log = (level) => (...args) => logs.push(`${level}: ${args.join(" ")}`);
@@ -50,10 +52,11 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		name: "MMM-phase6",
 		getServerModuleConfig: () => config,
 		// Like socket.io, send the payload as JSON
-		sendSocketNotification: (notification, payload) => notifications.push({ notification, payload: JSON.parse(JSON.stringify(payload)) })
+		sendSocketNotification: (notification, payload) => notifications.push({ notification, payload: JSON.parse(JSON.stringify(payload)) }),
+		io: { of: (name) => ({ on: (event, handler) => connections.push({ name, event, handler }) }) }
 	});
 	helper.start();
-	return { helper, site, timers, notifications, logs, context };
+	return { helper, site, timers, connections, notifications, logs, context };
 }
 
 // Wait until the update has finished: the stand-in answers at once, so a few
@@ -233,6 +236,25 @@ test("sends nothing to a module that starts before the first update has finished
 	const { helper, notifications } = createHelper();
 	helper.socketNotificationReceived("GET_PROFILES");
 	assert.deepEqual(notifications, []);
+});
+
+test("sends the profiles at once to a browser that connects, also again after it was offline, without asking phase6", async () => {
+	const { site, connections, notifications } = createHelper();
+	assert.deepEqual(connections.map(({ name, event }) => `${name} ${event}`), ["MMM-phase6 connection"]);
+	const [{ handler }] = connections;
+	const emitted = [];
+	// Like socket.io, send the payload as JSON
+	const socket = { emit: (notification, payload) => emitted.push({ notification, payload: JSON.parse(JSON.stringify(payload)) }) };
+	// Nothing before the first update has finished
+	handler(socket);
+	assert.deepEqual(emitted, []);
+	await settle();
+	const requests = site.requests.length;
+	handler(socket);
+	handler(socket);
+	assert.deepEqual(emitted, [notifications.at(-1), notifications.at(-1)]);
+	assert.deepEqual(names(emitted), ["Emma", "Noah"]);
+	assert.equal(site.requests.length, requests);
 });
 
 test("updates again updateInterval after an update has finished", async () => {

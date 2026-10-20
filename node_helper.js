@@ -202,6 +202,15 @@ module.exports = NodeHelper.create({
 		if (this.interval !== interval) {
 			Log.warn(`updateInterval is ${interval} milliseconds: the module updates every ${Math.round(this.interval / 1000)} seconds instead.`);
 		}
+		// Send the state to a browser as soon as it connects, also again after
+		// it was offline, without asking phase6: socket.io keeps no
+		// notification for a browser that is offline when it is sent, e.g.
+		// while its Wi-Fi is gone or its device sleeps
+		this.io.of(this.name).on("connection", (socket) => {
+			if (this.state) {
+				socket.emit("PROFILES", this.state);
+			}
+		});
 		const missing = this.findMissingCredentials();
 		if (missing) {
 			this.report(missing);
