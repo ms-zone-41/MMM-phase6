@@ -14,22 +14,26 @@ const TRANSLATIONS = {
 	de: { ...require("../translations/de.json"), LOADING: "Lade …", TODAY: "Heute", YESTERDAY: "Gestern", MODULE_ERROR_RATE_LIMITED: "Zu viele Anfragen. Erneuter Versuch später.", MODULE_ERROR_UNSPECIFIED: "Prüfe die Logdateien für weitere Details." }
 };
 
-// The clock of the browser stands still on 10 October 2026 at 18:00
+// The clock of the browser stands still on 10 October 2026 at 18:00, unless
+// a test moves it
 const NOW = new Date(2026, 9, 10, 18, 0).getTime();
+let now = NOW;
 class FixedDate extends Date {
 	constructor(...args) {
-		super(...(args.length > 0 ? args : [NOW]));
+		super(...(args.length > 0 ? args : [now]));
 	}
 
 	static now() {
-		return NOW;
+		return now;
 	}
 }
 
 // Load the module like MagicMirror² does, with document and the config of
-// MagicMirror² as globals
+// MagicMirror² as globals, and a setInterval() that only collects the timers,
+// which the tests run themselves
 const document = new JSDOM("<!doctype html><html><body></body></html>").window.document;
 const globalConfig = {};
+const intervals = [];
 let definition;
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../MMM-phase6.js"), "utf8"), {
 	Module: {
@@ -40,7 +44,8 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../MMM-phase6.js"), "ut
 	Log: { info() {} },
 	document,
 	config: globalConfig,
-	Date: FixedDate
+	Date: FixedDate,
+	setInterval: (callback, delay) => intervals.push({ callback, delay })
 });
 
 // The profiles as the node helper sends them
@@ -138,6 +143,23 @@ test("shows the date of earlier days, with the year only for another year", () =
 
 test("shows another text of phase6 as it is", () => {
 	assert.deepEqual(dates([{ ...EMMA, lastLearned: "Heute, 15:25" }], "de"), ["Heute, 15:25"]);
+});
+
+test("shows the profiles again every minute, so that today and yesterday change at midnight also while no update arrives", () => {
+	const module = createModule("de");
+	// The timer of this module, which it started last
+	const { callback, delay } = intervals.at(-1);
+	assert.equal(delay, 60 * 1000);
+	receive(module, [EMMA, NOAH], { code: "LOGIN_FAILED" });
+	now = new Date(2026, 9, 11, 0, 1).getTime();
+	try {
+		const updates = module.updates;
+		callback();
+		assert.equal(module.updates, updates + 1);
+		assert.deepEqual(rows(module.getDom()).slice(1).map((row) => row[1]), ["Gestern", "09.10."]);
+	} finally {
+		now = NOW;
+	}
 });
 
 test("shows the name and the due vocabulary bright only while vocabulary is due", () => {

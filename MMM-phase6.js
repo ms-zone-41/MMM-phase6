@@ -23,6 +23,9 @@ Module.register("MMM-phase6", {
 		this.profiles = null;
 		this.error = null;
 		this.sendSocketNotification("GET_PROFILES");
+		// Show the profiles again every minute, like the calendar: today and
+		// yesterday change at midnight, also while no update arrives
+		setInterval(() => this.updateDom(), 60 * 1000);
 	},
 
 	getStyles() {

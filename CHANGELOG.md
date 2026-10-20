@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - While phase6 had a problem, it also rejected a correct login, and the module showed the old profiles until MagicMirror² restarted. If the login has worked since MagicMirror² started, the module now tries again after 30 minutes, then after 4 more hours, and shows the time of the next try. Then it waits for a restart, so that phase6 does not lock the account
 - After a rejected login, the message asked to check the username and the password, although phase6 may also reject a correct login while it has a problem. It now asks to check the login at phase-6.de
+- Today and yesterday did not change at midnight until the next update arrived, so after a rejected login, an open mirror still showed yesterday a day later. The module now shows the profiles again every minute, like the calendar
 
 ## 2.0.2 - 2026-10-12
 
