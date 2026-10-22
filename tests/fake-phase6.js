@@ -13,13 +13,14 @@ const path = require("node:path");
 const OVERVIEW = fs.readFileSync(path.join(__dirname, "fixtures/parent.html"), "utf8");
 
 // A subject as the web app sends it: a vocabulary collection with the
-// numbers of its words, here those due (PRACTICE), and the time its profile
-// last practised it
-function subject(name, due, lastPracticed, isExpired = false) {
+// numbers of its words, here all those due (PRACTICE) and those that phase6
+// asks for today, at most the daily limit (SHOULD_PRACTICE_TODAY), and the
+// time its profile last practised it
+function subject(name, { all, today }, lastPracticed, isExpired = false) {
 	return {
 		subjectContent: { name },
 		subjectMetadata: { lastPracticedDate: lastPracticed?.toISOString() ?? null },
-		groupedCardCount: { cardCounts: { PRACTICE: { cardCount: due }, LIBRARY: { cardCount: 500 } } },
+		groupedCardCount: { cardCounts: { PRACTICE: { cardCount: all }, SHOULD_PRACTICE_TODAY: { cardCount: today }, LIBRARY: { cardCount: 500 } } },
 		isExpired
 	};
 }
@@ -27,15 +28,16 @@ function subject(name, due, lastPracticed, isExpired = false) {
 // The subjects in the web app, by the ID of their profile. The family
 // overview shows other numbers, those of an hour ago: there Emma has 29 words
 // due and last learned on 10 October at 15:25, Noah 50 and on 9 October at
-// 07:09. The trial of Emma has expired.
+// 07:09. The daily limits of Emma's English and of Noah are 20 and 48 words,
+// and the trial of Emma has expired.
 const SUBJECTS = {
 	1000001: [],
 	1000002: [
-		subject("Englisch", 25, new Date(2026, 9, 10, 15, 31, 40)),
-		subject("Latein", 3, new Date(2026, 9, 8, 7, 0)),
-		subject("Spanisch (Probe)", 40, new Date(2026, 8, 1, 12, 0), true)
+		subject("Englisch", { all: 25, today: 20 }, new Date(2026, 9, 10, 15, 31, 40)),
+		subject("Latein", { all: 3, today: 3 }, new Date(2026, 9, 8, 7, 0)),
+		subject("Spanisch (Probe)", { all: 40, today: 40 }, new Date(2026, 8, 1, 12, 0), true)
 	],
-	1000003: [subject("Französisch", 52, new Date(2026, 9, 9, 7, 12, 5))]
+	1000003: [subject("Französisch", { all: 52, today: 48 }, new Date(2026, 9, 9, 7, 12, 5))]
 };
 
 // The form of the login page, as on www.phase-6.de

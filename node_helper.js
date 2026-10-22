@@ -143,10 +143,10 @@ function localTime(time) {
 // The due vocabulary of a profile in its subjects, as the web app of phase6
 // sends them, and when it last learned, or null if a subject has no number
 // of due vocabulary. The subjects are its vocabulary collections, each with
-// the numbers of its words: PRACTICE are all words that are due. A subject
-// that has expired, e.g. after a trial, has no due vocabulary.
-function countsOf(subjects) {
-	const counts = subjects.filter((subject) => !subject.isExpired).map((subject) => subject.groupedCardCount?.cardCounts?.PRACTICE?.cardCount);
+// the numbers of its words, e.g. PRACTICE, see DUE_COUNTS. A subject that has
+// expired, e.g. after a trial, has no due vocabulary.
+function countsOf(subjects, count) {
+	const counts = subjects.filter((subject) => !subject.isExpired).map((subject) => subject.groupedCardCount?.cardCounts?.[count]?.cardCount);
 	if (!counts.every(Number.isInteger)) {
 		return null;
 	}
@@ -168,6 +168,10 @@ const LOGIN_PAGE = "/classic/service/user/login.html";
 // of a child. It has the due vocabulary as it is, while the family overview
 // may still show the numbers of an hour ago.
 const WEB_APP = "https://lernen.phase-6.de/server.integration/";
+// The numbers of the web app for the values of the option due: all words
+// that are due, or those that phase6 asks for today, at most the daily limit
+// of each vocabulary collection, as the phase6 app shows them under Heute
+const DUE_COUNTS = { all: "PRACTICE", today: "SHOULD_PRACTICE_TODAY" };
 // How the module introduces itself to phase6
 const USER_AGENT = "MMM-phase6 (MagicMirror²)";
 // How long phase6 may take to answer a request, in milliseconds
@@ -191,6 +195,7 @@ const DEFAULTS = {
 	password: "",
 	updateInterval: 10 * MINUTE,
 	profiles: [],
+	due: "all",
 	dueAdjustments: {}
 };
 
@@ -247,6 +252,10 @@ module.exports = NodeHelper.create({
 		this.interval = Math.min(Math.max(interval, MINUTE), 2 ** 31 - 1);
 		if (this.interval !== interval) {
 			Log.warn(`updateInterval is ${interval} milliseconds: the module updates every ${Math.round(this.interval / 1000)} seconds instead.`);
+		}
+		if (!Object.hasOwn(DUE_COUNTS, this.config.due)) {
+			Log.warn(`due is ${JSON.stringify(this.config.due)}, not "all" or "today": the module shows all due words instead.`);
+			this.config.due = DEFAULTS.due;
 		}
 		// Send the state to a browser as soon as it connects, also again after
 		// it was offline, without asking phase6: socket.io keeps no
@@ -433,7 +442,7 @@ module.exports = NodeHelper.create({
 			token = await this.webAppToken(true);
 			reply = await this.askWebApp(path, token.headers);
 		}
-		const counts = Array.isArray(reply.subjects) && countsOf(reply.subjects.map(([, subject]) => subject));
+		const counts = Array.isArray(reply.subjects) && countsOf(reply.subjects.map(([, subject]) => subject), DUE_COUNTS[this.config.due]);
 		if (!counts) {
 			throw problem("MODULE_ERROR_UNSPECIFIED", {}, `The web app of phase6 sent no due vocabulary of ${name}`);
 		}

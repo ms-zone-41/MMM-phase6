@@ -708,10 +708,23 @@ test("reports that the web app is not reachable or asks for fewer requests", asy
 });
 
 test("does not count the due words of a subject that has expired, but takes it for when the profile last learned", async () => {
-	const subjects = { ...SUBJECTS, 1000003: [subject("Französisch", 2, new Date(2026, 9, 1, 9, 0)), subject("Italienisch (Probe)", 9, new Date(2026, 9, 9, 18, 45), true)] };
+	const subjects = { ...SUBJECTS, 1000003: [subject("Französisch", { all: 2, today: 2 }, new Date(2026, 9, 1, 9, 0)), subject("Italienisch (Probe)", { all: 9, today: 9 }, new Date(2026, 9, 9, 18, 45), true)] };
 	const { notifications } = createHelper({ site: fakePhase6({ subjects }) });
 	await settle();
 	assert.deepEqual(last(notifications).profiles[1], { name: "Noah", lastLearned: "2026-10-09T18:45", due: 2, streak: 0 });
+});
+
+test("shows the words that phase6 asks for today, at most the daily limit, with due: today", async () => {
+	assert.deepEqual((await sent({ due: "today" })).profiles.map(({ name, due }) => [name, due]), [["Emma", 23], ["Noah", 48]]);
+	assert.deepEqual((await sent({ due: "today", dueAdjustments: { Noah: 2 } })).profiles.map(({ due }) => due), [23, 50]);
+});
+
+test("shows all due words for another value of due, and warns about it", async () => {
+	const { notifications, logs } = createHelper({ config: { ...CONFIG, due: "heute" } });
+	await settle();
+	assert.deepEqual(last(notifications).profiles.map(({ due }) => due), [28, 52]);
+	assert.deepEqual(logs.filter((line) => line.startsWith("warn:")), ["warn: due is \"heute\", not \"all\" or \"today\": the module shows all due words instead."]);
+	assert.deepEqual((await sent({ due: "all" })).profiles.map(({ due }) => due), [28, 52]);
 });
 
 test("sends only what the module shows, without surnames", async () => {

@@ -56,6 +56,7 @@ In the password, write `$$` for each `$`. A password with `"` or `\` does not wo
 | `username` | The e-mail address of the login. | |
 | `password` | The password of the login. | |
 | `profiles` | The profiles to show, in this order, by their first name or their full name on phase6, e.g. `["Emma", "Noah"]`. The module shows each name as you write it. Add your own first name to show your own profile too. | The children, by their first name |
+| `due` | The due words to show: `"all"` for all words that are due, or `"today"` for those that phase6 asks for today, at most the daily limit (Tägliches Abfragelimit) of each vocabulary collection, as the phase6 app shows them under Heute. | `"all"` |
 | `dueAdjustments` | A number to add to the due words of a profile, by its name as in `profiles`, e.g. `{ Emma: -1 }` if phase6 counts a word as due that cannot be learned. | `{}` |
 | `updateInterval` | The time between two updates, in milliseconds, at least one minute. | `10 * 60 * 1000` (10 minutes) |
 

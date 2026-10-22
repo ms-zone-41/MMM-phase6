@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- `due: "today"` shows the words that phase6 asks for today, at most the daily limit of each vocabulary collection, as the phase6 app shows them under Heute. The default, `"all"`, shows all words that are due
+
 ### Fixed
 
 - The due words could be an hour old: the page Meine Familie › Übersicht shows them late, e.g. still 31 words due 50 minutes after a child had learned them. The module now reads the due words and the day a profile last learned from the phase6 web app, where you see the reports of your children, which has them up to date. The streak still comes from the page
