@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `due: "today"` shows the words that phase6 asks for today, at most the daily limit of each vocabulary collection, as the phase6 app shows them under Heute. The default, `"all"`, shows all words that are due
 
+### Changed
+
+- While phase6 does not answer, the message says since when, so that you know how old the dimmed profiles are, and whether phase6 is down ("phase6 has been down since 23:16"), e.g. when it refuses the connection, or the mirror cannot reach it, e.g. without internet ("phase6 has not been reachable since 23:16"). The reason, e.g. ECONNREFUSED, is now in the log only
+
 ### Fixed
 
 - The due words could be an hour old: the page Meine Familie › Übersicht shows them late, e.g. still 31 words due 50 minutes after a child had learned them. The module now reads the due words and the day a profile last learned from the phase6 web app, where you see the reports of your children, which has them up to date. The streak still comes from the page

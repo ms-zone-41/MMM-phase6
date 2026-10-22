@@ -192,12 +192,23 @@ const DEFAULTS = {
 	dueAdjustments: {}
 };
 
+// The codes of Node.js for a mirror that cannot find the address of phase6,
+// or has no way to it, e.g. without internet: then phase6 is not reachable.
+// Any other failure, e.g. a refused connection, no answer in time or an error
+// of its server, means that phase6 is down: while phase6 has a problem, it
+// refuses connections and lets them time out in turn.
+const NO_CONNECTION = ["EAI_AGAIN", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ENETDOWN"];
+// The problems while phase6 does not answer: the module tries again in a
+// minute, and their messages say since when
+const OUTAGES = ["DOWN", "NOT_REACHABLE"];
+
 // What the log adds about each problem: what to do
 const HINTS = {
 	NO_CREDENTIALS: "Add it, then restart MagicMirror². See the README.",
 	LOGIN_FAILED: "Log in at https://www.phase-6.de with the same login. If it works, phase6 had a problem; if it keeps failing, correct the username or the password. Then restart MagicMirror². Until then, the module does not try again, so that phase6 does not lock the account.",
 	LOGIN_RETRY: "phase6 may also reject a correct login while it has a problem. If the password has changed on phase6, correct it, then restart MagicMirror².",
-	NOT_REACHABLE: "The module tries again in a minute.",
+	DOWN: "The module tries again in a minute.",
+	NOT_REACHABLE: "The module tries again in a minute. If it stays, check the internet connection of the mirror.",
 	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",
 	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues.",
 	UNKNOWN_PROFILE: "Correct profiles or dueAdjustments in config/config.js, then restart MagicMirror².",
@@ -216,7 +227,7 @@ function problem(code, variables, log) {
 function failure(response, path) {
 	const detail = `HTTP ${response.status}`;
 	if (response.status >= 500) {
-		return problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
+		return problem("DOWN", {}, `phase6 is down: ${detail}`);
 	}
 	return problem(response.status === 429 ? "MODULE_ERROR_RATE_LIMITED" : "NO_FAMILY", {}, `phase6 answered ${path} with ${detail}`);
 }
@@ -327,7 +338,7 @@ module.exports = NodeHelper.create({
 		if (this.stopped) {
 			return;
 		}
-		let delay = error?.code === "NOT_REACHABLE" ? MINUTE : this.interval;
+		let delay = OUTAGES.includes(error?.code) ? MINUTE : this.interval;
 		if (error?.code === "LOGIN_FAILED") {
 			// phase6 may also reject a correct login while it has a problem, with
 			// the same ErrorCode. So after a login that worked, try again a few
@@ -355,6 +366,11 @@ module.exports = NodeHelper.create({
 		// Errors of Node.js have codes too, e.g. ERR_INVALID_URL
 		const hint = HINTS[error?.code];
 		const reported = error && (hint ? { code: error.code, ...error.variables } : { code: "MODULE_ERROR_UNSPECIFIED" });
+		// Since when phase6 does not answer, for the message: the time of the
+		// first of the updates in a row that found it down or not reachable
+		if (OUTAGES.includes(reported?.code)) {
+			reported.time = OUTAGES.includes(this.state?.error?.code) ? this.state.error.time : Date.now();
+		}
 		if (error && JSON.stringify(reported) !== JSON.stringify(this.state?.error)) {
 			if (hint) {
 				Log.error(`${error.message}. ${hint}`);
@@ -493,7 +509,7 @@ module.exports = NodeHelper.create({
 		} catch (error) {
 			// fetch() fails with "fetch failed" and the reason as its cause
 			const detail = error.name === "TimeoutError" ? "timeout" : error.cause?.code ?? error.cause?.message ?? error.message;
-			throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
+			throw NO_CONNECTION.includes(detail) ? problem("NOT_REACHABLE", {}, `phase6 is not reachable: ${detail}`) : problem("DOWN", {}, `phase6 is down: ${detail}`);
 		}
 	},
 

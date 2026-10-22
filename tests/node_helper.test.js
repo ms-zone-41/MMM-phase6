@@ -11,11 +11,13 @@ const { fakePhase6, subject, OVERVIEW, LOGIN_PAGE, SUBJECTS } = require("./fake-
 // The options of the module in config.js
 const CONFIG = { username: "parent@example.com", password: "secret" };
 
-// The clock of the node helper stands still on 19 October 2026 at 01:51
+// The clock of the node helper stands still on 19 October 2026 at 01:51,
+// unless a test moves it
 const NOW = new Date(2026, 9, 19, 1, 51).getTime();
+let now = NOW;
 class FixedDate extends Date {
 	static now() {
-		return NOW;
+		return now;
 	}
 }
 
@@ -402,7 +404,7 @@ test("tries a rejected login again after each login that worked", async () => {
 	assert.deepEqual([...timers].map(({ delay }) => delay), [30 * 60 * 1000]);
 });
 
-test("keeps counting the rejected logins while phase6 is not reachable in between", async () => {
+test("keeps counting the rejected logins while phase6 is down in between", async () => {
 	const { site, timers, notifications } = createHelper();
 	await settle();
 	site.expire();
@@ -410,7 +412,7 @@ test("keeps counting the rejected logins while phase6 is not reachable in betwee
 	await updateAgain(timers);
 	site.fail(() => new Response("", { status: 503 }));
 	await updateAgain(timers);
-	assert.deepEqual(last(notifications).error, { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	assert.deepEqual(last(notifications).error, { code: "DOWN", time: NOW });
 	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
 	site.fail(rejectLogins);
 	await updateAgain(timers);
@@ -430,7 +432,7 @@ test("tries a rejected login again also after a login that worked although the p
 	});
 	const { timers, notifications } = createHelper({ site });
 	await settle();
-	assert.equal(last(notifications).error.code, "NOT_REACHABLE");
+	assert.equal(last(notifications).error.code, "DOWN");
 	site.fail(null);
 	await updateAgain(timers);
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
@@ -468,22 +470,67 @@ test("counts a rejected login without loading the login page it leads to, which 
 	assert.ok(site.requests.every(({ path }) => !path.includes("ErrorCode")));
 });
 
-test("reports that phase6 is not reachable: no connection, a timeout or an error of phase6", async () => {
+test("reports that phase6 is not reachable when the mirror cannot find it or has no way to it, e.g. without internet", async () => {
+	for (const code of ["EAI_AGAIN", "ENOTFOUND", "ENETUNREACH"]) {
+		assert.deepEqual(await problemOf(() => {
+			throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error(`getaddrinfo ${code} www.phase-6.de`), { code }) });
+		}), { code: "NOT_REACHABLE", time: NOW });
+	}
+});
+
+test("reports that phase6 is down when it refuses the connection, does not answer in time, or has an error", async () => {
 	assert.deepEqual(await problemOf(() => {
-		throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND www.phase-6.de"), { code: "ENOTFOUND" }) });
-	}), { code: "NOT_REACHABLE", detail: "ENOTFOUND" });
+		throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED 144.76.199.212:443"), { code: "ECONNREFUSED" }) });
+	}), { code: "DOWN", time: NOW });
 	assert.deepEqual(await problemOf(() => {
 		throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-	}), { code: "NOT_REACHABLE", detail: "timeout" });
-	assert.deepEqual(await problemOf(() => new Response("Wartungsarbeiten", { status: 503 })), { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	}), { code: "DOWN", time: NOW });
+	assert.deepEqual(await problemOf(() => new Response("Wartungsarbeiten", { status: 503 })), { code: "DOWN", time: NOW });
 	// While phase6 sends a page, too
 	const breaking = (error) => () => new Response(new ReadableStream({
 		pull(controller) {
 			controller.error(error);
 		}
 	}));
-	assert.deepEqual(await problemOf(breaking(new DOMException("The operation was aborted due to timeout", "TimeoutError"))), { code: "NOT_REACHABLE", detail: "timeout" });
-	assert.deepEqual(await problemOf(breaking(Object.assign(new TypeError("terminated"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }))), { code: "NOT_REACHABLE", detail: "UND_ERR_SOCKET" });
+	assert.deepEqual(await problemOf(breaking(new DOMException("The operation was aborted due to timeout", "TimeoutError"))), { code: "DOWN", time: NOW });
+	assert.deepEqual(await problemOf(breaking(Object.assign(new TypeError("terminated"), { cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }) }))), { code: "DOWN", time: NOW });
+});
+
+test("says since when phase6 does not answer, also when the problem changes in between", async () => {
+	const site = fakePhase6();
+	const { timers, notifications } = createHelper({ site });
+	await settle();
+	try {
+		const refused = () => {
+			throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+		};
+		const timeout = () => {
+			throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+		};
+		const offline = () => {
+			throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN"), { code: "EAI_AGAIN" }) });
+		};
+		const errors = [];
+		for (const [minute, failure] of [[1, refused], [2, timeout], [3, offline], [4, refused]]) {
+			now = NOW + minute * 60 * 1000;
+			site.fail(failure);
+			await updateAgain(timers);
+			errors.push(last(notifications).error);
+			assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
+		}
+		const since = NOW + 60 * 1000;
+		assert.deepEqual(errors, [{ code: "DOWN", time: since }, { code: "DOWN", time: since }, { code: "NOT_REACHABLE", time: since }, { code: "DOWN", time: since }]);
+		site.fail(null);
+		await updateAgain(timers);
+		assert.equal(last(notifications).error, null);
+		// A new time after an update that worked
+		now = NOW + 10 * 60 * 1000;
+		site.fail(timeout);
+		await updateAgain(timers);
+		assert.deepEqual(last(notifications).error, { code: "DOWN", time: now });
+	} finally {
+		now = NOW;
+	}
 });
 
 test("reports too many requests, and tries again at the next update", async () => {
@@ -495,14 +542,14 @@ test("reports too many requests, and tries again at the next update", async () =
 	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
 });
 
-test("keeps the profiles while phase6 is not reachable, and tries again in a minute", async () => {
+test("keeps the profiles while phase6 is down, and tries again in a minute", async () => {
 	const site = fakePhase6();
 	const { timers, notifications } = createHelper({ site });
 	await settle();
 	const { profiles } = last(notifications);
 	site.fail(() => new Response("", { status: 502 }));
 	await updateAgain(timers);
-	assert.deepEqual(last(notifications), { profiles, error: { code: "NOT_REACHABLE", detail: "HTTP 502" } });
+	assert.deepEqual(last(notifications), { profiles, error: { code: "DOWN", time: NOW } });
 	assert.deepEqual([...timers].map(({ delay }) => delay), [60 * 1000]);
 	site.fail(null);
 	await updateAgain(timers);
@@ -580,14 +627,19 @@ test("logs a problem once, and again when it changes, and when phase6 works agai
 	site.fail(() => new Response("", { status: 503 }));
 	await updateAgain(timers);
 	await updateAgain(timers);
+	// The same problem, only with another detail
 	site.fail(() => new Response("", { status: 502 }));
+	await updateAgain(timers);
+	site.fail(() => {
+		throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo EAI_AGAIN www.phase-6.de"), { code: "EAI_AGAIN" }) });
+	});
 	await updateAgain(timers);
 	site.fail(null);
 	await updateAgain(timers);
 	assert.deepEqual(logs, [
 		"info: Logged in to phase6",
-		"error: phase6 is not reachable: HTTP 503. The module tries again in a minute.",
-		"error: phase6 is not reachable: HTTP 502. The module tries again in a minute.",
+		"error: phase6 is down: HTTP 503. The module tries again in a minute.",
+		"error: phase6 is not reachable: EAI_AGAIN. The module tries again in a minute. If it stays, check the internet connection of the mirror.",
 		"info: phase6 works again"
 	]);
 });
@@ -701,12 +753,12 @@ test("reports when the web app sends no due words, keeps the profiles, and tries
 	assert.match(other.logs.at(-1), /^error: The web app of phase6 sent no due vocabulary of Emma\. phase6 may have changed its web app/);
 });
 
-test("reports that the web app is not reachable or asks for fewer requests", async () => {
+test("reports that the web app is down or asks for fewer requests", async () => {
 	const webApp = (answer) => (url) => (new URL(url).host === "lernen.phase-6.de" ? answer() : null);
-	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 503 }))), { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 503 }))), { code: "DOWN", time: NOW });
 	assert.deepEqual(await problemOf(webApp(() => {
 		throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-	})), { code: "NOT_REACHABLE", detail: "timeout" });
+	})), { code: "DOWN", time: NOW });
 	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 429 }))), { code: "MODULE_ERROR_RATE_LIMITED" });
 	// Also for the subjects, without a new token
 	const site = fakePhase6();

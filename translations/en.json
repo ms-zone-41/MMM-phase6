@@ -5,7 +5,8 @@
 	"NO_CREDENTIALS": "{name} is missing in {file}",
 	"LOGIN_FAILED": "phase6 rejected the login: check it at phase-6.de, then restart MagicMirror²",
 	"LOGIN_RETRY": "phase6 is rejecting the login (next try at {time})",
-	"NOT_REACHABLE": "phase6 is not reachable ({detail})",
+	"NOT_REACHABLE": "phase6 has not been reachable since {time}",
+	"DOWN": "phase6 has been down since {time}",
 	"NO_FAMILY": "phase6 shows no family members: is this the parent's login?",
 	"UNKNOWN_PROFILE": "phase6 has no profile {name}. Profiles: {names}"
 }

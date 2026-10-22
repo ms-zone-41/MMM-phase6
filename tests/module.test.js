@@ -64,7 +64,7 @@ function createModule(language = "en", locale = undefined, timeFormat = 24) {
 		name: "MMM-phase6",
 		config: { ...definition.defaults },
 		socketNotifications: [],
-		// Like MagicMirror², fill in variables such as {detail}
+		// Like MagicMirror², fill in variables such as {name}
 		translate(key, variables = {}) {
 			return (TRANSLATIONS[language][key] ?? key).replace(/{([^{}]+)}/g, (placeholder, name) => (name in variables ? variables[name] : placeholder));
 		},
@@ -192,8 +192,8 @@ test("shows a problem without a table if no update has worked yet", () => {
 
 test("shows a problem above the profiles of the last update that worked, dimmed until an update works", () => {
 	const module = createModule();
-	const dom = receive(module, [EMMA, NOAH], { code: "NOT_REACHABLE", detail: "HTTP 503" });
-	assert.equal(warning(dom), "phase6 is not reachable (HTTP 503)");
+	const dom = receive(module, [EMMA, NOAH], { code: "DOWN", time: new Date(2026, 9, 10, 17, 16).getTime() });
+	assert.equal(warning(dom), "phase6 has been down since 17:16");
 	assert.deepEqual(Array.from(dom.children, (element) => element.className), ["p6-warning", "p6-profiles p6-stale dimmed"]);
 	assert.equal(rows(dom).length, 3);
 	// Nothing bright, also while vocabulary is due
@@ -231,9 +231,18 @@ test("shows the time of the next try in the language and the time format of the 
 	assert.equal(warning(receive(createModule("en", undefined, 12), [EMMA], error)).replace(/\s/g, " "), "phase6 is rejecting the login (next try at 12:05 AM)");
 });
 
+test("says since when phase6 is down or not reachable, in the language and the time format of the mirror", () => {
+	const time = new Date(2026, 9, 9, 23, 16).getTime();
+	assert.equal(warning(receive(createModule("de"), [EMMA], { code: "DOWN", time })), "phase6 ist seit 23:16 gestört");
+	assert.equal(warning(receive(createModule("de"), [EMMA], { code: "NOT_REACHABLE", time })), "phase6 ist seit 23:16 nicht erreichbar");
+	assert.equal(warning(receive(createModule("en"), [EMMA], { code: "NOT_REACHABLE", time })), "phase6 has not been reachable since 23:16");
+	// Some versions of Node.js put a narrow space before PM
+	assert.equal(warning(receive(createModule("en", undefined, 12), [EMMA], { code: "DOWN", time })).replace(/\s/g, " "), "phase6 has been down since 11:16 PM");
+});
+
 test("has a message for each problem of the node helper, in each language", () => {
 	for (const language of ["en", "de"]) {
-		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "LOGIN_RETRY", "NOT_REACHABLE", "NO_FAMILY", "UNKNOWN_PROFILE"]) {
+		for (const code of ["NO_CREDENTIALS", "LOGIN_FAILED", "LOGIN_RETRY", "DOWN", "NOT_REACHABLE", "NO_FAMILY", "UNKNOWN_PROFILE"]) {
 			assert.ok(TRANSLATIONS[language][code], `${language}: ${code}`);
 		}
 	}
