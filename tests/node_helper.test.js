@@ -6,7 +6,7 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const { fakePhase6, OVERVIEW, LOGIN_PAGE } = require("./fake-phase6.js");
+const { fakePhase6, subject, OVERVIEW, LOGIN_PAGE, SUBJECTS } = require("./fake-phase6.js");
 
 // The options of the module in config.js
 const CONFIG = { username: "parent@example.com", password: "secret" };
@@ -39,6 +39,7 @@ function createHelper({ config = CONFIG, site = fakePhase6() } = {}) {
 		URL,
 		URLSearchParams,
 		AbortSignal,
+		crypto,
 		Date: FixedDate,
 		setTimeout: (callback, delay) => {
 			const timer = { callback, delay };
@@ -125,17 +126,17 @@ test("logs in with the options of config.js and sends the profiles of the childr
 	assert.equal(login.form.josso_password, "secret");
 });
 
-test("asks only www.phase-6.de", async () => {
+test("asks only phase6: its website and its web app", async () => {
 	const { site } = createHelper();
 	await settle();
 	assert.ok(site.requests.length > 0);
-	assert.deepEqual(new Set(site.requests.map(({ host }) => host)), new Set(["www.phase-6.de"]));
+	assert.deepEqual(new Set(site.requests.map(({ host }) => host)), new Set(["www.phase-6.de", "lernen.phase-6.de"]));
 });
 
 test("logs in with the form of the login page and follows the redirects", async () => {
 	const { site, logs } = createHelper();
 	await settle();
-	assert.deepEqual(site.requests.map(({ method, path }) => `${method} ${path}`), [
+	assert.deepEqual(site.requests.filter(({ host }) => host === "www.phase-6.de").map(({ method, path }) => `${method} ${path}`), [
 		"GET /classic/service/user/parent/",
 		"GET /classic/service/user/",
 		"GET /classic/service/user/login.html",
@@ -165,15 +166,19 @@ test("keeps the cookies of the session across the redirects", async () => {
 	await settle();
 	const [login] = site.requests.filter(({ method }) => method === "POST");
 	assert.deepEqual(login.cookies, { JSESSIONID: "J1", TPU: "T1" });
-	assert.ok(site.requests.slice(4).every(({ cookies }) => cookies.JOSSO_SESSIONID === "S1"));
+	assert.ok(site.requests.slice(4).filter(({ host }) => host === "www.phase-6.de").every(({ cookies }) => cookies.JOSSO_SESSIONID === "S1"));
 });
 
-test("asks phase6 once per update while the session lasts", async () => {
+test("asks the family overview and the web app once per update while the session lasts", async () => {
 	const { site, timers, notifications } = createHelper();
 	await settle();
 	const requests = site.requests.length;
 	await updateAgain(timers);
-	assert.deepEqual(site.requests.slice(requests).map(({ method, path }) => `${method} ${path}`), ["GET /classic/service/user/parent/"]);
+	assert.deepEqual(site.requests.slice(requests).map(({ method, host, path }) => `${method} ${host}${path}`), [
+		"GET www.phase-6.de/classic/service/user/parent/",
+		"GET lernen.phase-6.de/server.integration/userSubjectsFromGroupData/1000002/true/foreign",
+		"GET lernen.phase-6.de/server.integration/userSubjectsFromGroupData/1000003/true/foreign"
+	]);
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
 });
 
@@ -218,7 +223,7 @@ test("takes no options from socket notifications", async () => {
 	const { helper, site, notifications } = createHelper();
 	helper.socketNotificationReceived("GET_PROFILES", { username: "other@example.com", password: "other", baseUrl: "https://example.com" });
 	await settle();
-	assert.ok(site.requests.every(({ host, form }) => host === "www.phase-6.de" && (!form || form.josso_username === "parent@example.com")));
+	assert.ok(site.requests.every(({ host, form }) => ["www.phase-6.de", "lernen.phase-6.de"].includes(host) && (!form || form.josso_username === "parent@example.com")));
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
 });
 
@@ -589,8 +594,8 @@ test("logs a problem once, and again when it changes, and when phase6 works agai
 
 test("shows the children by their first name", async () => {
 	assert.deepEqual((await sent({})).profiles, [
-		{ name: "Emma", lastLearned: "2026-10-10T15:25", due: 29, streak: 28 },
-		{ name: "Noah", lastLearned: "2026-10-09T07:09", due: 50, streak: 0 }
+		{ name: "Emma", lastLearned: "2026-10-10T15:31", due: 28, streak: 28 },
+		{ name: "Noah", lastLearned: "2026-10-09T07:12", due: 52, streak: 0 }
 	]);
 	assert.deepEqual((await sent({}, OVERVIEW.replace("Muster Emma", "Muster Anna Lena").replace("Muster Noah", "Noah"))).profiles.map(({ name }) => name), ["Anna Lena", "Noah"]);
 });
@@ -600,8 +605,8 @@ test("shows all profiles if there are no children", async () => {
 });
 
 test("shows the profiles of the option profiles, in its order and with its names", async () => {
-	assert.deepEqual((await sent({ profiles: ["noah", "Muster Emma", "Lena"] })).profiles.map(({ name, due }) => [name, due]), [["noah", 50], ["Muster Emma", 29], ["Lena", 0]]);
-	assert.deepEqual((await sent({ profiles: "Emma" })).profiles.map(({ name, due }) => [name, due]), [["Emma", 29]]);
+	assert.deepEqual((await sent({ profiles: ["noah", "Muster Emma", "Lena"] })).profiles.map(({ name, due }) => [name, due]), [["noah", 52], ["Muster Emma", 28], ["Lena", 0]]);
+	assert.deepEqual((await sent({ profiles: "Emma" })).profiles.map(({ name, due }) => [name, due]), [["Emma", 28]]);
 });
 
 test("reports the names in profiles and dueAdjustments that match no profile", async () => {
@@ -614,7 +619,99 @@ test("reports the names in profiles and dueAdjustments that match no profile", a
 });
 
 test("adds dueAdjustments to the due vocabulary, but not below zero", async () => {
-	assert.deepEqual((await sent({ dueAdjustments: { emma: -1, Noah: "-60" } })).profiles.map(({ due }) => due), [28, 0]);
+	assert.deepEqual((await sent({ dueAdjustments: { emma: -1, Noah: "-60" } })).profiles.map(({ due }) => due), [27, 0]);
+});
+
+test("reads the due words and when they last learned from the web app, which has them without the delay of the family overview", async () => {
+	const { site, notifications } = createHelper();
+	await settle();
+	// The words of the subjects that have not expired, and the last practice
+	// in any subject, in the local time of the mirror
+	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Emma", "2026-10-10T15:31", 28], ["Noah", "2026-10-09T07:12", 52]]);
+	const webApp = site.requests.filter(({ host }) => host === "lernen.phase-6.de");
+	assert.deepEqual(webApp.map(({ path }) => path), [
+		"/server.integration/jossoInfo",
+		"/server.integration/userSubjectsFromGroupData/1000002/true/foreign",
+		"/server.integration/userSubjectsFromGroupData/1000003/true/foreign"
+	]);
+	// A token for the session, then the token, the e-mail address of the
+	// login and the ID of this client, without cookies
+	assert.equal(webApp[0].headers["x-jauthtoken"], "S1");
+	for (const { headers } of webApp.slice(1)) {
+		assert.equal(headers["x-jauthtoken"], "P1");
+		assert.equal(headers["x-lbtoken"], "parent@example.com");
+		assert.match(headers["x-clientid"], /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/);
+	}
+	assert.equal(webApp[1].headers["x-clientid"], webApp[2].headers["x-clientid"]);
+	assert.ok(webApp.every(({ headers, redirect, signal }) => !("cookie" in headers) && headers["user-agent"] === "MMM-phase6 (MagicMirror²)" && redirect === "manual" && signal));
+});
+
+test("reads the own profile of the login from its own subjects, like the web app", async () => {
+	const { site, notifications } = createHelper({ config: { ...CONFIG, profiles: ["Lena", "Emma"] } });
+	await settle();
+	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Lena", null, 0], ["Emma", "2026-10-10T15:31", 28]]);
+	assert.deepEqual(site.requests.filter(({ host }) => host === "lernen.phase-6.de").map(({ path }) => path).slice(1), [
+		"/server.integration/userSubjectsData",
+		"/server.integration/userSubjectsFromGroupData/1000002/true/foreign"
+	]);
+});
+
+test("asks the web app for a token once per session, again after a login, and when the web app no longer takes it", async () => {
+	const { site, timers, notifications } = createHelper();
+	await settle();
+	const exchanges = () => site.requests.filter(({ path }) => path === "/server.integration/jossoInfo").map(({ headers }) => headers["x-jauthtoken"]);
+	await updateAgain(timers);
+	assert.deepEqual(exchanges(), ["S1"]);
+	// e.g. after some time
+	site.expireTokens();
+	await updateAgain(timers);
+	assert.deepEqual(exchanges(), ["S1", "S1"]);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+	site.expire();
+	await updateAgain(timers);
+	assert.deepEqual(exchanges(), ["S1", "S1", "S2"]);
+	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
+});
+
+test("reports when the web app sends no due words, keeps the profiles, and tries again at the next update", async () => {
+	const site = fakePhase6();
+	const { timers, notifications, logs } = createHelper({ site });
+	await settle();
+	const { profiles } = last(notifications);
+	site.fail((url) => (new URL(url).pathname.includes("/userSubjectsFromGroupData/") ? Response.json({ httpCode: 403 }) : null));
+	const requests = site.requests.length;
+	await updateAgain(timers);
+	assert.deepEqual(last(notifications), { profiles, error: { code: "MODULE_ERROR_UNSPECIFIED" } });
+	assert.deepEqual([...timers].map(({ delay }) => delay), [10 * 60 * 1000]);
+	assert.equal(logs.at(-1), "error: The web app of phase6 answered userSubjectsFromGroupData/1000002/true/foreign with httpCode 403. phase6 may have changed its web app: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues.");
+	// Once more with a new token
+	assert.deepEqual(site.requests.slice(requests).filter(({ host }) => host === "lernen.phase-6.de").map(({ path }) => path), [
+		"/server.integration/userSubjectsFromGroupData/1000002/true/foreign",
+		"/server.integration/jossoInfo",
+		"/server.integration/userSubjectsFromGroupData/1000002/true/foreign"
+	]);
+	assert.deepEqual(await problemOf((url) => (new URL(url).host === "lernen.phase-6.de" ? new Response("Seite nicht gefunden", { status: 404 }) : null)), { code: "MODULE_ERROR_UNSPECIFIED" });
+	// A subject without the number of its due words
+	const other = createHelper({ site: fakePhase6({ subjects: { ...SUBJECTS, 1000002: [{ subjectContent: { name: "Englisch" }, isExpired: false }] } }) });
+	await settle();
+	assert.deepEqual(last(other.notifications).error, { code: "MODULE_ERROR_UNSPECIFIED" });
+	assert.match(other.logs.at(-1), /^error: The web app of phase6 sent no due vocabulary of Emma\. phase6 may have changed its web app/);
+});
+
+test("reports that the web app is not reachable or asks for fewer requests", async () => {
+	const webApp = (answer) => (url) => (new URL(url).host === "lernen.phase-6.de" ? answer() : null);
+	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 503 }))), { code: "NOT_REACHABLE", detail: "HTTP 503" });
+	assert.deepEqual(await problemOf(webApp(() => {
+		throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+	})), { code: "NOT_REACHABLE", detail: "timeout" });
+	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 429 }))), { code: "MODULE_ERROR_RATE_LIMITED" });
+});
+
+test("does not count the due words of a subject that has expired, but takes it for when the profile last learned", async () => {
+	const subjects = { ...SUBJECTS, 1000003: [subject("Französisch", 2, new Date(2026, 9, 1, 9, 0)), subject("Italienisch (Probe)", 9, new Date(2026, 9, 9, 18, 45), true)] };
+	const { notifications } = createHelper({ site: fakePhase6({ subjects }) });
+	await settle();
+	assert.deepEqual(last(notifications).profiles[1], { name: "Noah", lastLearned: "2026-10-09T18:45", due: 2, streak: 0 });
 });
 
 test("sends only what the module shows, without surnames", async () => {
@@ -623,17 +720,12 @@ test("sends only what the module shows, without surnames", async () => {
 	assert.doesNotMatch(JSON.stringify(notifications), /Muster|Lena|@/);
 });
 
-test("reads the profiles of the family overview", () => {
+test("reads the profiles of the family overview, with the IDs of their links", () => {
 	assert.deepEqual(parse(OVERVIEW), [
-		{ name: "Muster Lena", child: false, lastLearned: null, due: 0, streak: 0 },
-		{ name: "Muster Emma", child: true, lastLearned: "2026-10-10T15:25", due: 29, streak: 28 },
-		{ name: "Muster Noah", child: true, lastLearned: "2026-10-09T07:09", due: 50, streak: 0 }
+		{ name: "Muster Lena", id: "1000001", child: false, streak: 0 },
+		{ name: "Muster Emma", id: "1000002", child: true, streak: 28 },
+		{ name: "Muster Noah", id: "1000003", child: true, streak: 0 }
 	]);
-});
-
-test("reads a date without a time, and passes another text on as it is", () => {
-	assert.equal(parse(OVERVIEW.replace("10.10.2026 15:25", "10.10.2026"))[1].lastLearned, "2026-10-10T00:00");
-	assert.equal(parse(OVERVIEW.replace("10.10.2026 15:25", "Heute, 15:25"))[1].lastLearned, "Heute, 15:25");
 });
 
 test("reads names with entities", () => {
@@ -641,7 +733,7 @@ test("reads names with entities", () => {
 });
 
 test("reads numbers with dots between thousands", () => {
-	assert.equal(parse(OVERVIEW.replace("<span>29</span>", "<span>1.234</span>"))[1].due, 1234);
+	assert.equal(parse(OVERVIEW.replace("<span>28</span>", "<span>1.234</span>"))[1].streak, 1234);
 });
 
 test("skips panels without a profile", () => {

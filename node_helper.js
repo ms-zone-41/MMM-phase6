@@ -1,7 +1,8 @@
 /* MagicMirror²
  * Node Helper: MMM-phase6
  *
- * Logs in to phase6 and reads the family overview.
+ * Logs in to phase6 and reads the family overview, and the due vocabulary
+ * from the web app of phase6.
  *
  * MIT Licensed.
  */
@@ -44,10 +45,13 @@ function attributeOf(tag, name) {
 //     <small>…Zuletzt gelernt: <span>10.10.2026 15:25</span></small>
 //     <small>…Fällige Vokabeln: <span>29</span></small>
 //     <small>…Tage in Folge gelernt: <span>28</span></small>
+//     … onclick="location.assign('/lernen/?redirectUrl=/reports/1000002/list')"
 //
-// A profile that has never learned shows "Bislang noch nicht gelernt <span>
-// </span>" instead of the date. Panels without a number of due vocabulary,
-// e.g. offers, are not profiles.
+// The module takes the name, the streak and the ID of each profile, which
+// its links have, e.g. the one to its reports. The family overview shows the
+// due vocabulary and when a profile last learned up to an hour late: the
+// module reads them from the web app of phase6 instead, see fetchCounts().
+// Panels without a number of due vocabulary, e.g. offers, are not profiles.
 function parseProfiles(html) {
 	const panels = [...html.matchAll(/<div\s+class="([^"]*)"/g)].filter(([, classes]) => ["button", "row", "panel"].every((name) => classes.split(/\s+/).includes(name)));
 	return panels.flatMap((panel, index) => {
@@ -59,21 +63,16 @@ function parseProfiles(html) {
 		};
 		// A number, also with dots between thousands, e.g. 1.234
 		const number = (text) => (/^\d{1,3}(\.\d{3})*$|^\d+$/.test(text ?? "") ? Number(text.replaceAll(".", "")) : null);
-		const due = number(value("Vokabeln"));
 		const streak = number(value("in Folge gelernt"));
-		if (due === null || streak === null) {
+		const id = (/(?:ContactID=|\/reports\/|subMenu)(\d+)/).exec(part)?.[1];
+		if (number(value("Vokabeln")) === null || streak === null || !id) {
 			return [];
 		}
-		// The date in the local time of the mirror, e.g. "2026-10-10T15:25", or
-		// another text as it is
-		const last = value("Zuletzt gelernt") || null;
-		const date = (/^(\d{2})\.(\d{2})\.(\d{4})(?: (\d{2}):(\d{2}))?$/).exec(last ?? "");
 		return [{
 			// The text of the <b> up to its first tag, without the subscription
 			name: textOf(/<b\b[^>]*>([^<]*)/.exec(part)?.[1] ?? ""),
+			id,
 			child: panel[1].split(/\s+/).includes("child"),
-			lastLearned: date ? `${date[3]}-${date[2]}-${date[1]}T${date[4] ?? "00"}:${date[5] ?? "00"}` : last,
-			due,
 			streak
 		}];
 	});
@@ -111,7 +110,8 @@ function firstName(name) {
 	return name.split(" ").slice(1).join(" ") || name;
 }
 
-// What the module shows of the profiles, and the names in the options that
+// The profiles that the module shows, with their names in the module and the
+// number to add to their due vocabulary, and the names in the options that
 // match no profile. The profiles are those of the option profiles, in its
 // order and with its names, or else the children by their first name, or
 // all profiles if there are no children.
@@ -124,21 +124,52 @@ function selectProfiles(profiles, options) {
 		: (children.length > 0 ? children : profiles).map((profile) => [firstName(profile.name), profile]);
 	const adjustments = typeof options.dueAdjustments === "object" ? Object.entries(options.dueAdjustments ?? {}) : [];
 	return {
-		shown: rows.filter(([, profile]) => profile).map(([name, profile]) => {
-			const adjustment = Number(adjustments.find(([key]) => matches(profile.name, key))?.[1]) || 0;
-			return { name, lastLearned: profile.lastLearned, due: Math.max(0, profile.due + adjustment), streak: profile.streak };
-		}),
+		shown: rows.filter(([, profile]) => profile).map(([name, profile]) => ({
+			name,
+			profile,
+			adjustment: Number(adjustments.find(([key]) => matches(profile.name, key))?.[1]) || 0
+		})),
 		unknown: [...rows.filter(([, profile]) => !profile).map(([name]) => name), ...adjustments.map(([key]) => key).filter((key) => !profiles.some((profile) => matches(profile.name, key)))]
 	};
 }
 
-// The website of phase6, which is the only one the node helper asks
+// A time in the local time of the mirror, e.g. "2026-10-22T19:55"
+function localTime(time) {
+	const date = new Date(time);
+	const pad = (number) => String(number).padStart(2, "0");
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// The due vocabulary of a profile in its subjects, as the web app of phase6
+// sends them, and when it last learned, or null if a subject has no number
+// of due vocabulary. The subjects are its vocabulary collections, each with
+// the numbers of its words: PRACTICE are all words that are due. A subject
+// that has expired, e.g. after a trial, has no due vocabulary.
+function countsOf(subjects) {
+	const counts = subjects.filter((subject) => !subject.isExpired).map((subject) => subject.groupedCardCount?.cardCounts?.PRACTICE?.cardCount);
+	if (!counts.every(Number.isInteger)) {
+		return null;
+	}
+	const times = subjects.map((subject) => Date.parse(subject.subjectMetadata?.lastPracticedDate)).filter((time) => !Number.isNaN(time));
+	return {
+		due: counts.reduce((sum, count) => sum + count, 0),
+		lastLearned: times.length > 0 ? localTime(Math.max(...times)) : null
+	};
+}
+
+// The website of phase6, the only one that gets the cookies of the session
 const PHASE6 = "https://www.phase-6.de";
 // The family overview, "Meine Familie › Übersicht", with the profiles of the
 // parent and the children
 const OVERVIEW = `${PHASE6}/classic/service/user/parent/`;
 // Where phase6 sends a browser without a session, and a rejected login
 const LOGIN_PAGE = "/classic/service/user/login.html";
+// The web app of phase6, to which the family overview links for the reports
+// of a child. It has the due vocabulary as it is, while the family overview
+// may still show the numbers of an hour ago.
+const WEB_APP = "https://lernen.phase-6.de/server.integration/";
+// How the module introduces itself to phase6
+const USER_AGENT = "MMM-phase6 (MagicMirror²)";
 // How long phase6 may take to answer a request, in milliseconds
 const TIMEOUT = 30 * 1000;
 // The shortest time between two updates, and the time until the next try
@@ -171,7 +202,8 @@ const HINTS = {
 	NOT_REACHABLE: "The module tries again in a minute.",
 	MODULE_ERROR_RATE_LIMITED: "The module tries again at the next update.",
 	NO_FAMILY: "Use the login of the parent, which shows the children under Meine Familie on phase6. If you do, phase6 may have changed its website: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues.",
-	UNKNOWN_PROFILE: "Correct profiles or dueAdjustments in config/config.js, then restart MagicMirror²."
+	UNKNOWN_PROFILE: "Correct profiles or dueAdjustments in config/config.js, then restart MagicMirror².",
+	MODULE_ERROR_UNSPECIFIED: "phase6 may have changed its web app: update the module, or report it at https://github.com/ms-zone-41/MMM-phase6/issues."
 };
 
 // A problem that the module shows, by its code, with the variables of its
@@ -179,6 +211,16 @@ const HINTS = {
 // the module, or of MagicMirror², e.g. MODULE_ERROR_RATE_LIMITED.
 function problem(code, variables, log) {
 	return Object.assign(new Error(log), { code, variables });
+}
+
+// The problem of an answer of phase6 that is not OK: phase6 is down, asks for
+// fewer requests, or does not have the page
+function failure(response, path) {
+	const detail = `HTTP ${response.status}`;
+	if (response.status >= 500) {
+		return problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
+	}
+	return problem(response.status === 429 ? "MODULE_ERROR_RATE_LIMITED" : "NO_FAMILY", {}, `phase6 answered ${path} with ${detail}`);
 }
 
 module.exports = NodeHelper.create({
@@ -189,6 +231,10 @@ module.exports = NodeHelper.create({
 		this.config = { ...DEFAULTS, ...this.getServerModuleConfig() };
 		// The cookies of the session with phase6, by name
 		this.cookies = new Map();
+		// The token of the web app for the session, see webAppToken(), and an
+		// ID of this client, which the web app in a browser sends too
+		this.token = null;
+		this.clientId = crypto.randomUUID();
 		// Nothing to send until the first update has finished
 		this.state = null;
 		this.profiles = null;
@@ -261,7 +307,12 @@ module.exports = NodeHelper.create({
 			// password has changed.
 			this.retries = [...RETRIES];
 			const { shown, unknown } = selectProfiles(profiles, this.config);
-			this.profiles = shown;
+			const rows = [];
+			for (const { name, profile, adjustment } of shown) {
+				const { due, lastLearned } = await this.fetchCounts(profile, name);
+				rows.push({ name, lastLearned, due: Math.max(0, due + adjustment), streak: profile.streak });
+			}
+			this.profiles = rows;
 			if (unknown.length > 0) {
 				const names = profiles.map((profile) => firstName(profile.name)).join(", ");
 				error = problem("UNKNOWN_PROFILE", { name: unknown.join(", "), names }, `phase6 has no profile ${unknown.join(", ")}, only ${names}`);
@@ -365,6 +416,83 @@ module.exports = NodeHelper.create({
 		});
 	},
 
+	// The due vocabulary of a profile and when it last learned, from the web
+	// app of phase6: like its reports, it reads the subjects of a child, or
+	// those of the login itself. A token that the web app does not take, e.g.
+	// after some time, is exchanged once for a new one.
+	async fetchCounts(profile, name) {
+		let token = await this.webAppToken();
+		const path = profile.id === token.userId ? "userSubjectsData" : `userSubjectsFromGroupData/${profile.id}/true/foreign`;
+		let reply;
+		try {
+			reply = await this.askWebApp(path, token.headers);
+		} catch (error) {
+			if (!error.refused) {
+				throw error;
+			}
+			token = await this.webAppToken(true);
+			reply = await this.askWebApp(path, token.headers);
+		}
+		const counts = Array.isArray(reply.subjects) && countsOf(reply.subjects.map(([, subject]) => subject));
+		if (!counts) {
+			throw problem("MODULE_ERROR_UNSPECIFIED", {}, `The web app of phase6 sent no due vocabulary of ${name}`);
+		}
+		return counts;
+	},
+
+	// The token of the web app for the session of the login, with the ID of
+	// the login and the headers that the web app asks for. The web app gives
+	// the token for the session cookie, like when the family overview opens
+	// the reports. A new session, after a login, gets a new token, and so does
+	// renew.
+	async webAppToken(renew = false) {
+		const session = this.cookies.get("JOSSO_SESSIONID");
+		if (renew || this.token?.session !== session) {
+			const reply = await this.askWebApp("jossoInfo", { "X-JAUTHTOKEN": session });
+			this.token = {
+				session,
+				userId: String(reply.userDnsId),
+				headers: { "X-JAUTHTOKEN": reply.p6pSessionToken, "X-CLIENTID": this.clientId, "X-LBTOKEN": String(reply.email ?? "").toLowerCase() }
+			};
+		}
+		return this.token;
+	},
+
+	// The replyContent of the web app for a path. The web app answers with
+	// JSON, whose httpCode is 200 if it worked. Without cookies: the web app
+	// takes its token instead.
+	async askWebApp(path, headers) {
+		const { response, text } = await this.load(new URL(path, WEB_APP), { headers: { ...headers, "User-Agent": USER_AGENT, "Accept": "application/json" } });
+		if (response.status >= 500 || response.status === 429) {
+			throw failure(response, path);
+		}
+		let reply = null;
+		try {
+			reply = JSON.parse(text);
+		} catch {
+			// Not JSON, e.g. a page of an error
+		}
+		if (!response.ok || reply?.httpCode !== 200) {
+			const detail = reply ? `httpCode ${reply.httpCode}` : `HTTP ${response.status}`;
+			// e.g. a token that the web app does not take
+			throw Object.assign(problem("MODULE_ERROR_UNSPECIFIED", {}, `The web app of phase6 answered ${path} with ${detail}`), { refused: true });
+		}
+		return reply.replyContent;
+	},
+
+	// Fetch a URL of phase6 and read its answer, without following redirects
+	async load(url, options) {
+		try {
+			const response = await fetch(url, { ...options, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT) });
+			// The timeout or a lost connection can also end reading the answer
+			return { response, text: await response.text() };
+		} catch (error) {
+			// fetch() fails with "fetch failed" and the reason as its cause
+			const detail = error.name === "TimeoutError" ? "timeout" : error.cause?.code ?? error.cause?.message ?? error.message;
+			throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
+		}
+	},
+
 	// Fetch a page of phase6 with the cookies of the session, and follow the
 	// redirects: fetch() keeps no cookies, and phase6 sets those of the
 	// session in redirects. A redirect to the path until ends the request,
@@ -375,28 +503,16 @@ module.exports = NodeHelper.create({
 			if (next.origin !== PHASE6) {
 				throw problem("NO_FAMILY", {}, `phase6 redirected to ${next.origin}`);
 			}
-			let response;
-			let html;
-			try {
-				response = await fetch(next, {
-					method,
-					body,
-					redirect: "manual",
-					headers: {
-						...headers,
-						"User-Agent": "MMM-phase6 (MagicMirror²)",
-						"Accept-Language": "de",
-						"Cookie": [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ")
-					},
-					signal: AbortSignal.timeout(TIMEOUT)
-				});
-				// The timeout or a lost connection can also end reading the page
-				html = await response.text();
-			} catch (error) {
-				// fetch() fails with "fetch failed" and the reason as its cause
-				const detail = error.name === "TimeoutError" ? "timeout" : error.cause?.code ?? error.cause?.message ?? error.message;
-				throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
-			}
+			const { response, text: html } = await this.load(next, {
+				method,
+				body,
+				headers: {
+					...headers,
+					"User-Agent": USER_AGENT,
+					"Accept-Language": "de",
+					"Cookie": [...this.cookies].map(([name, value]) => `${name}=${value}`).join("; ")
+				}
+			});
 			this.keepCookies(response);
 			const location = response.headers.get("location");
 			if (response.status >= 300 && response.status < 400 && location) {
@@ -411,12 +527,7 @@ module.exports = NodeHelper.create({
 				continue;
 			}
 			if (!response.ok) {
-				const detail = `HTTP ${response.status}`;
-				// phase6 is down, asks for fewer requests, or does not have the page
-				if (response.status >= 500) {
-					throw problem("NOT_REACHABLE", { detail }, `phase6 is not reachable: ${detail}`);
-				}
-				throw problem(response.status === 429 ? "MODULE_ERROR_RATE_LIMITED" : "NO_FAMILY", {}, `phase6 answered ${next.pathname} with ${detail}`);
+				throw failure(response, next.pathname);
 			}
 			return { url: next, html };
 		}

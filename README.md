@@ -4,7 +4,7 @@ A [MagicMirror²](https://magicmirror.builders) module that shows how your child
 
 ![Emma, Noah and Mia with the day they last learned, their due words and their streak](screenshot.png)
 
-The module logs in to phase6 with your login and reads the page Meine Familie › Übersicht. A name and its due words are bright while words are due. The module is not from phase6 and may stop working when phase6 changes its website. Use it at your own risk, see the [terms of phase6](https://www.phase-6.de/agb.html).
+The module logs in to phase6 with your login. It reads the profiles and their streak from the page Meine Familie › Übersicht, and the due words and the day they last learned from the phase6 web app, where you see the reports of your children: the page shows those up to an hour late. A name and its due words are bright while words are due. The module is not from phase6 and may stop working when phase6 changes its website or its web app. Use it at your own risk, see the [terms of phase6](https://www.phase-6.de/agb.html).
 
 ## Installation
 
@@ -73,7 +73,7 @@ The module shows a message above the profiles when something is wrong, and the l
 | phase6 is not reachable | Nothing: the module tries again every minute. If the message stays, check the internet connection of the mirror. |
 | phase6 shows no family members | Use the login of the parent, see [Configuration](#configuration). If you do, phase6 may have changed its website: [update](#update) the module, or [report it](https://github.com/ms-zone-41/MMM-phase6/issues). |
 | phase6 has no profile … | Correct the name in `profiles` or `dueAdjustments`. The message lists the profiles that phase6 has. |
-| Check logs for more details. | [Report it](https://github.com/ms-zone-41/MMM-phase6/issues), with the lines of MMM-phase6 in the log. |
+| Check logs for more details. | [Update](#update) the module, or [report it](https://github.com/ms-zone-41/MMM-phase6/issues), with the lines of MMM-phase6 in the log. |
 
 ## Development
 
@@ -85,7 +85,7 @@ node --run test
 node --run lint
 ```
 
-The tests read [tests/fixtures/parent.html](tests/fixtures/parent.html), a copy of the page Meine Familie › Übersicht with invented names. When phase6 changes the page, replace it with the new page, and give it the invented names, e-mail addresses, IDs and numbers of the old one, which the tests expect.
+The tests read [tests/fixtures/parent.html](tests/fixtures/parent.html), a copy of the page Meine Familie › Übersicht with invented names, and [tests/fake-phase6.js](tests/fake-phase6.js) answers like phase6 and its web app. When phase6 changes the page, replace it with the new page, and give it the invented names, e-mail addresses, IDs and numbers of the old one, which the tests expect.
 
 ## License
 

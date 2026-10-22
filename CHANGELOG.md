@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Fixed
+
+- The due words could be an hour old: the page Meine Familie › Übersicht shows them late, e.g. still 31 words due 50 minutes after a child had learned them. The module now reads the due words and the day a profile last learned from the phase6 web app, where you see the reports of your children, which has them up to date. The streak still comes from the page
+
 ## 2.0.3 - 2026-10-20
 
 ### Fixed

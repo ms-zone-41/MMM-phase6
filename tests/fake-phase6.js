@@ -1,15 +1,42 @@
-// A stand-in for www.phase-6.de for the tests of the node helper. It answers
-// fetch() like the website: without a session, the family overview redirects
-// to the login page, and the login redirects to the family overview, or back
-// to the login page with an ErrorCode. The cookie JOSSO_SESSIONID holds the
-// session.
+// A stand-in for www.phase-6.de and the web app of phase6 for the tests of the
+// node helper. It answers fetch() like the website: without a session, the
+// family overview redirects to the login page, and the login redirects to the
+// family overview, or back to the login page with an ErrorCode. The cookie
+// JOSSO_SESSIONID holds the session. The web app at lernen.phase-6.de gives a
+// token for a session, and the subjects of the profiles for the token.
 
 const fs = require("node:fs");
 const path = require("node:path");
 
 // The family overview of Lena Muster and her children Emma and Noah, with
-// invented names and e-mail addresses
+// invented names, e-mail addresses and IDs
 const OVERVIEW = fs.readFileSync(path.join(__dirname, "fixtures/parent.html"), "utf8");
+
+// A subject as the web app sends it: a vocabulary collection with the
+// numbers of its words, here those due (PRACTICE), and the time its profile
+// last practised it
+function subject(name, due, lastPracticed, isExpired = false) {
+	return {
+		subjectContent: { name },
+		subjectMetadata: { lastPracticedDate: lastPracticed?.toISOString() ?? null },
+		groupedCardCount: { cardCounts: { PRACTICE: { cardCount: due }, LIBRARY: { cardCount: 500 } } },
+		isExpired
+	};
+}
+
+// The subjects in the web app, by the ID of their profile. The family
+// overview shows other numbers, those of an hour ago: there Emma has 29 words
+// due and last learned on 10 October at 15:25, Noah 50 and on 9 October at
+// 07:09. The trial of Emma has expired.
+const SUBJECTS = {
+	1000001: [],
+	1000002: [
+		subject("Englisch", 25, new Date(2026, 9, 10, 15, 31, 40)),
+		subject("Latein", 3, new Date(2026, 9, 8, 7, 0)),
+		subject("Spanisch (Probe)", 40, new Date(2026, 8, 1, 12, 0), true)
+	],
+	1000003: [subject("Französisch", 52, new Date(2026, 9, 9, 7, 12, 5))]
+};
 
 // The form of the login page, as on www.phase-6.de
 const LOGIN_PAGE = `<html><body>
@@ -34,15 +61,18 @@ function answer(status, { body = null, location, cookies = [] } = {}) {
 	return new Response(body, { status, headers });
 }
 
-// The stand-in, with the account parent@example.com, the password secret and
-// the given family overview. requests lists each request, with its cookies
-// and the fields of its form. expire() ends the sessions, and fail(handler)
-// lets handler(url) answer instead, e.g. with an error, while it returns
-// something.
-function fakePhase6({ overview = OVERVIEW, loginPage = LOGIN_PAGE } = {}) {
+// The stand-in, with the account parent@example.com of Lena, the password
+// secret, the given family overview and the given subjects. requests lists
+// each request, with its cookies, its headers and the fields of its form.
+// expire() ends the sessions and the tokens, expireTokens() only the tokens,
+// and fail(handler) lets handler(url) answer instead, e.g. with an error,
+// while it returns something.
+function fakePhase6({ overview = OVERVIEW, loginPage = LOGIN_PAGE, subjects = SUBJECTS } = {}) {
 	const requests = [];
 	const sessions = new Set();
+	const tokens = new Set();
 	let logins = 0;
+	let issued = 0;
 	let failure = null;
 
 	async function fetch(url, options = {}) {
@@ -51,10 +81,35 @@ function fakePhase6({ overview = OVERVIEW, loginPage = LOGIN_PAGE } = {}) {
 		const headers = new Headers(options.headers);
 		const cookies = Object.fromEntries((headers.get("cookie") ?? "").split(/;\s*/).filter(Boolean).map((pair) => pair.split("=")));
 		const form = options.body ? Object.fromEntries(new URLSearchParams(String(options.body))) : null;
-		requests.push({ method, host, path: pathname + search, cookies, form, redirect: options.redirect, signal: options.signal });
-		const response = (failure && await failure(url)) || route(method, pathname, cookies, form);
+		requests.push({ method, host, path: pathname + search, cookies, headers: Object.fromEntries(headers), form, redirect: options.redirect, signal: options.signal });
+		const response = (failure && await failure(url)) || (host === "lernen.phase-6.de" ? webApp(method, pathname, headers) : route(method, pathname, cookies, form));
 		// Like fetch(), with the URL of the request
 		return Object.defineProperty(response, "url", { value: String(url) });
+	}
+
+	// The web app answers with JSON: httpCode 200 and the replyContent if it
+	// worked, 401 for a session or a token that it does not take
+	function webApp(method, pathname, headers) {
+		const token = headers.get("x-jauthtoken");
+		if (method === "GET" && pathname === "/server.integration/jossoInfo") {
+			if (!sessions.has(token)) {
+				return Response.json({ httpCode: 401 });
+			}
+			const p6pSessionToken = `P${++issued}`;
+			tokens.add(p6pSessionToken);
+			return Response.json({ httpCode: 200, replyContent: { userDnsId: 1000001, email: "Parent@Example.com", p6pSessionToken, jossoSessionId: token } });
+		}
+		if (!tokens.has(token)) {
+			return Response.json({ httpCode: 401 });
+		}
+		// The subjects of the login itself, or of a child of the family
+		const own = pathname === "/server.integration/userSubjectsData";
+		const [, child] = (/^\/server\.integration\/userSubjectsFromGroupData\/(\d+)\/true\/foreign$/).exec(pathname) ?? [];
+		const id = own ? "1000001" : child;
+		if (method !== "GET" || !id || (child && !["1000002", "1000003"].includes(child))) {
+			return Response.json({ httpCode: 403 });
+		}
+		return Response.json({ httpCode: 200, replyContent: { subjects: (subjects[id] ?? []).map((value, index) => [`${id}-${index}`, value]) } });
 	}
 
 	function route(method, pathname, cookies, form) {
@@ -83,11 +138,15 @@ function fakePhase6({ overview = OVERVIEW, loginPage = LOGIN_PAGE } = {}) {
 	return {
 		fetch,
 		requests,
-		expire: () => sessions.clear(),
+		expire: () => {
+			sessions.clear();
+			tokens.clear();
+		},
+		expireTokens: () => tokens.clear(),
 		fail: (handler) => {
 			failure = handler;
 		}
 	};
 }
 
-module.exports = { fakePhase6, OVERVIEW, LOGIN_PAGE };
+module.exports = { fakePhase6, subject, OVERVIEW, LOGIN_PAGE, SUBJECTS };
