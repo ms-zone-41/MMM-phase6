@@ -594,8 +594,8 @@ test("logs a problem once, and again when it changes, and when phase6 works agai
 
 test("shows the children by their first name", async () => {
 	assert.deepEqual((await sent({})).profiles, [
-		{ name: "Emma", lastLearned: "2026-10-10T15:31", due: 28, streak: 28 },
-		{ name: "Noah", lastLearned: "2026-10-09T07:12", due: 52, streak: 0 }
+		{ name: "Emma", lastLearned: new Date(2026, 9, 10, 15, 31, 40).getTime(), due: 28, streak: 28 },
+		{ name: "Noah", lastLearned: new Date(2026, 9, 9, 7, 12, 5).getTime(), due: 52, streak: 0 }
 	]);
 	assert.deepEqual((await sent({}, OVERVIEW.replace("Muster Emma", "Muster Anna Lena").replace("Muster Noah", "Noah"))).profiles.map(({ name }) => name), ["Anna Lena", "Noah"]);
 });
@@ -626,8 +626,8 @@ test("reads the due words and when they last learned from the web app, which has
 	const { site, notifications } = createHelper();
 	await settle();
 	// The words of the subjects that have not expired, and the last practice
-	// in any subject, in the local time of the mirror
-	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Emma", "2026-10-10T15:31", 28], ["Noah", "2026-10-09T07:12", 52]]);
+	// in any subject
+	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Emma", new Date(2026, 9, 10, 15, 31, 40).getTime(), 28], ["Noah", new Date(2026, 9, 9, 7, 12, 5).getTime(), 52]]);
 	const webApp = site.requests.filter(({ host }) => host === "lernen.phase-6.de");
 	assert.deepEqual(webApp.map(({ path }) => path), [
 		"/server.integration/jossoInfo",
@@ -649,7 +649,7 @@ test("reads the due words and when they last learned from the web app, which has
 test("reads the own profile of the login from its own subjects, like the web app", async () => {
 	const { site, notifications } = createHelper({ config: { ...CONFIG, profiles: ["Lena", "Emma"] } });
 	await settle();
-	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Lena", null, 0], ["Emma", "2026-10-10T15:31", 28]]);
+	assert.deepEqual(last(notifications).profiles.map(({ name, lastLearned, due }) => [name, lastLearned, due]), [["Lena", null, 0], ["Emma", new Date(2026, 9, 10, 15, 31, 40).getTime(), 28]]);
 	assert.deepEqual(site.requests.filter(({ host }) => host === "lernen.phase-6.de").map(({ path }) => path).slice(1), [
 		"/server.integration/userSubjectsData",
 		"/server.integration/userSubjectsFromGroupData/1000002/true/foreign"
@@ -711,7 +711,7 @@ test("does not count the due words of a subject that has expired, but takes it f
 	const subjects = { ...SUBJECTS, 1000003: [subject("Französisch", { all: 2, today: 2 }, new Date(2026, 9, 1, 9, 0)), subject("Italienisch (Probe)", { all: 9, today: 9 }, new Date(2026, 9, 9, 18, 45), true)] };
 	const { notifications } = createHelper({ site: fakePhase6({ subjects }) });
 	await settle();
-	assert.deepEqual(last(notifications).profiles[1], { name: "Noah", lastLearned: "2026-10-09T18:45", due: 2, streak: 0 });
+	assert.deepEqual(last(notifications).profiles[1], { name: "Noah", lastLearned: new Date(2026, 9, 9, 18, 45).getTime(), due: 2, streak: 0 });
 });
 
 test("shows the words that phase6 asks for today, at most the daily limit, with due: today", async () => {

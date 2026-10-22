@@ -114,18 +114,14 @@ Module.register("MMM-phase6", {
 	},
 
 	// When a profile last learned: today, yesterday or the date, with the year
-	// only if it is not this year. The node helper sends the date of phase6,
-	// e.g. "2026-10-10T15:25", or any other text of phase6, which shows as it
-	// is.
+	// only if it is not this year, in the time zone of the mirror. The node
+	// helper sends the time in milliseconds, or null.
 	formatDate(value) {
 		if (!value) {
 			return "–";
 		}
-		const match = (/^(\d{4})-(\d\d)-(\d\d)T/).exec(value);
-		if (!match) {
-			return value;
-		}
-		const date = new Date(match[1], match[2] - 1, match[3]);
+		const date = new Date(value);
+		date.setHours(0, 0, 0, 0);
 		const today = new Date();
 		today.setHours(0, 0, 0, 0);
 		const days = Math.round((today - date) / (24 * 60 * 60 * 1000));

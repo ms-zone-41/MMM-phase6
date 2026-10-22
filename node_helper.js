@@ -133,16 +133,9 @@ function selectProfiles(profiles, options) {
 	};
 }
 
-// A time in the local time of the mirror, e.g. "2026-10-22T19:55"
-function localTime(time) {
-	const date = new Date(time);
-	const pad = (number) => String(number).padStart(2, "0");
-	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 // The due vocabulary of a profile in its subjects, as the web app of phase6
-// sends them, and when it last learned, or null if a subject has no number
-// of due vocabulary. The subjects are its vocabulary collections, each with
+// sends them, and when it last learned, in milliseconds, or null if a
+// subject has no number of due vocabulary. The subjects are its vocabulary collections, each with
 // the numbers of its words, e.g. PRACTICE, see DUE_COUNTS. A subject that has
 // expired, e.g. after a trial, has no due vocabulary.
 function countsOf(subjects, count) {
@@ -153,7 +146,7 @@ function countsOf(subjects, count) {
 	const times = subjects.map((subject) => Date.parse(subject.subjectMetadata?.lastPracticedDate)).filter((time) => !Number.isNaN(time));
 	return {
 		due: counts.reduce((sum, count) => sum + count, 0),
-		lastLearned: times.length > 0 ? localTime(Math.max(...times)) : null
+		lastLearned: times.length > 0 ? Math.max(...times) : null
 	};
 }
 

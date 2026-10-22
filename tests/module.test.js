@@ -1,6 +1,10 @@
 // Tests for the module, which shows the profiles on the mirror. Run them in
 // the module directory with `npm install` and `node --run test`.
 
+// A time zone other than UTC, so that the tests tell the day in the time zone
+// of the mirror from that in UTC, also on GitHub
+process.env.TZ = "Europe/Berlin";
+
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
@@ -49,8 +53,8 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../MMM-phase6.js"), "ut
 });
 
 // The profiles as the node helper sends them
-const EMMA = { name: "Emma", lastLearned: "2026-10-10T15:25", due: 29, streak: 28 };
-const NOAH = { name: "Noah", lastLearned: "2026-10-09T07:09", due: 0, streak: 3 };
+const EMMA = { name: "Emma", lastLearned: new Date(2026, 9, 10, 15, 25).getTime(), due: 29, streak: 28 };
+const NOAH = { name: "Noah", lastLearned: new Date(2026, 9, 9, 7, 9).getTime(), due: 0, streak: 3 };
 
 // Start the module in a mirror with the given language, locale and
 // timeFormat, with stand-ins for the methods of MagicMirror²
@@ -130,8 +134,8 @@ test("shows the profiles in a table, in the language of the mirror", () => {
 
 test("shows the date of earlier days, with the year only for another year", () => {
 	const profiles = [
-		{ ...EMMA, lastLearned: "2026-10-08T23:59" },
-		{ ...EMMA, lastLearned: "2025-12-30T08:00" },
+		{ ...EMMA, lastLearned: new Date(2026, 9, 8, 23, 59).getTime() },
+		{ ...EMMA, lastLearned: new Date(2025, 11, 30, 8, 0).getTime() },
 		{ ...EMMA, lastLearned: null }
 	];
 	assert.deepEqual(dates(profiles, "de"), ["08.10.", "30.12.2025", "–"]);
@@ -141,8 +145,9 @@ test("shows the date of earlier days, with the year only for another year", () =
 	assert.deepEqual(dates(profiles, "de", "de_DE"), ["08.10.", "30.12.2025", "–"]);
 });
 
-test("shows another text of phase6 as it is", () => {
-	assert.deepEqual(dates([{ ...EMMA, lastLearned: "Heute, 15:25" }], "de"), ["Heute, 15:25"]);
+test("takes the day in the time zone of the mirror", () => {
+	// 00:30 in Germany is still the day before in UTC
+	assert.deepEqual(dates([{ ...EMMA, lastLearned: Date.UTC(2026, 9, 9, 22, 30) }, { ...EMMA, lastLearned: Date.UTC(2026, 9, 9, 21, 59) }], "de"), ["Heute", "Gestern"]);
 });
 
 test("shows the profiles again every minute, so that today and yesterday change at midnight also while no update arrives", () => {
