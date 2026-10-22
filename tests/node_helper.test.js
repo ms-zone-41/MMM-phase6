@@ -668,8 +668,11 @@ test("asks the web app for a token once per session, again after a login, and wh
 	assert.deepEqual(exchanges(), ["S1", "S1"]);
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
 	site.expire();
+	const requests = site.requests.length;
 	await updateAgain(timers);
 	assert.deepEqual(exchanges(), ["S1", "S1", "S2"]);
+	// The new token comes before the subjects, not after a refusal
+	assert.equal(site.requests.slice(requests).find(({ host }) => host === "lernen.phase-6.de").path, "/server.integration/jossoInfo");
 	assert.deepEqual(names(notifications), ["Emma", "Noah"]);
 });
 
@@ -705,6 +708,13 @@ test("reports that the web app is not reachable or asks for fewer requests", asy
 		throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
 	})), { code: "NOT_REACHABLE", detail: "timeout" });
 	assert.deepEqual(await problemOf(webApp(() => new Response("", { status: 429 }))), { code: "MODULE_ERROR_RATE_LIMITED" });
+	// Also for the subjects, without a new token
+	const site = fakePhase6();
+	site.fail((url) => (new URL(url).pathname.includes("/userSubjectsFromGroupData/") ? new Response("", { status: 429 }) : null));
+	const { notifications } = createHelper({ site });
+	await settle();
+	assert.deepEqual(last(notifications).error, { code: "MODULE_ERROR_RATE_LIMITED" });
+	assert.equal(site.requests.filter(({ path }) => path === "/server.integration/jossoInfo").length, 1);
 });
 
 test("does not count the due words of a subject that has expired, but takes it for when the profile last learned", async () => {

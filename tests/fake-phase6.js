@@ -28,8 +28,9 @@ function subject(name, { all, today }, lastPracticed, isExpired = false) {
 // The subjects in the web app, by the ID of their profile. The family
 // overview shows other numbers, those of an hour ago: there Emma has 29 words
 // due and last learned on 10 October at 15:25, Noah 50 and on 9 October at
-// 07:09. The daily limits of Emma's English and of Noah are 20 and 48 words,
-// and the trial of Emma has expired.
+// 07:09. The daily limits of Emma's English and of Noah's French are 20 and
+// 48 words, the trial of Emma has expired, and Noah has not practised Latin
+// yet.
 const SUBJECTS = {
 	1000001: [],
 	1000002: [
@@ -37,7 +38,7 @@ const SUBJECTS = {
 		subject("Latein", { all: 3, today: 3 }, new Date(2026, 9, 8, 7, 0)),
 		subject("Spanisch (Probe)", { all: 40, today: 40 }, new Date(2026, 8, 1, 12, 0), true)
 	],
-	1000003: [subject("Französisch", { all: 52, today: 48 }, new Date(2026, 9, 9, 7, 12, 5))]
+	1000003: [subject("Französisch", { all: 52, today: 48 }, new Date(2026, 9, 9, 7, 12, 5)), subject("Latein", { all: 0, today: 0 })]
 };
 
 // The form of the login page, as on www.phase-6.de
