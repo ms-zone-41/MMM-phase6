@@ -111,7 +111,9 @@ function fakePhase6({ overview = OVERVIEW, loginPage = LOGIN_PAGE, subjects = SU
 		if (method !== "GET" || !id || (child && !["1000002", "1000003"].includes(child))) {
 			return Response.json({ httpCode: 403 });
 		}
-		return Response.json({ httpCode: 200, replyContent: { subjects: (subjects[id] ?? []).map((value, index) => [`${id}-${index}`, value]) } });
+		// Without subjects if the profile has none
+		const list = (subjects[id] ?? []).map((value, index) => [`${id}-${index}`, value]);
+		return Response.json({ httpCode: 200, replyContent: { hasFamilyGroup: true, hasCourseGroup: false, ...(list.length > 0 && { subjects: list }) } });
 	}
 
 	function route(method, pathname, cookies, form) {

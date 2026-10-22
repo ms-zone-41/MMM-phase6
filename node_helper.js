@@ -442,7 +442,9 @@ module.exports = NodeHelper.create({
 			token = await this.webAppToken(true);
 			reply = await this.askWebApp(path, token.headers);
 		}
-		const counts = Array.isArray(reply.subjects) && countsOf(reply.subjects.map(([, subject]) => subject), DUE_COUNTS[this.config.due]);
+		// The web app leaves out the subjects of a profile that has none
+		const subjects = reply.subjects ?? [];
+		const counts = Array.isArray(subjects) && countsOf(subjects.map(([, subject]) => subject), DUE_COUNTS[this.config.due]);
 		if (!counts) {
 			throw problem("MODULE_ERROR_UNSPECIFIED", {}, `The web app of phase6 sent no due vocabulary of ${name}`);
 		}
