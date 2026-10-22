@@ -4,7 +4,7 @@ A [MagicMirror²](https://magicmirror.builders) module that shows how your child
 
 ![Emma, Noah and Mia with the day they last learned, their due words and their streak](screenshot.png)
 
-The module logs in to phase6 with your login. It reads the profiles and their streak from the page Meine Familie › Übersicht, and the due words and the day they last learned from the phase6 web app, where you see the reports of your children: the page shows those up to an hour late. A name and its due words are bright while words are due. The module is not from phase6 and may stop working when phase6 changes its website or its web app. Use it at your own risk, see the [terms of phase6](https://www.phase-6.de/agb.html).
+The module logs in to phase6 with your login. It reads the profiles and their streak from the page Meine Familie › Übersicht, and the due words and the day they last learned from the phase6 web app, where you see the reports of your children: the page shows the due words up to an hour late. A name and its due words are bright while words are due. The module is not from phase6 and may stop working when phase6 changes its website or its web app. Use it at your own risk, see the [terms of phase6](https://www.phase-6.de/agb.html).
 
 ## Installation
 

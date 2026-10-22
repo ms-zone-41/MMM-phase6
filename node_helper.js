@@ -49,8 +49,8 @@ function attributeOf(tag, name) {
 //
 // The module takes the name, the streak and the ID of each profile, which
 // its links have, e.g. the one to its reports. The family overview shows the
-// due vocabulary and when a profile last learned up to an hour late: the
-// module reads them from the web app of phase6 instead, see fetchCounts().
+// due vocabulary up to an hour late: the module reads it, and when a profile
+// last learned, from the web app of phase6 instead, see fetchCounts().
 // Panels without a number of due vocabulary, e.g. offers, are not profiles.
 function parseProfiles(html) {
 	const panels = [...html.matchAll(/<div\s+class="([^"]*)"/g)].filter(([, classes]) => ["button", "row", "panel"].every((name) => classes.split(/\s+/).includes(name)));

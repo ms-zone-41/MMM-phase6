@@ -26,9 +26,9 @@ function subject(name, { all, today }, lastPracticed, isExpired = false) {
 }
 
 // The subjects in the web app, by the ID of their profile. The family
-// overview shows other numbers, those of an hour ago: there Emma has 29 words
-// due and last learned on 10 October at 15:25, Noah 50 and on 9 October at
-// 07:09. The daily limits of Emma's English and of Noah's French are 20 and
+// overview shows other numbers, with the due words of an hour ago: there Emma
+// has 29 words due and last learned on 10 October at 15:25, Noah 50 and on 9
+// October at 07:09. The daily limits of Emma's English and of Noah's French are 20 and
 // 48 words, the trial of Emma has expired, and Noah has not practised Latin
 // yet.
 const SUBJECTS = {
