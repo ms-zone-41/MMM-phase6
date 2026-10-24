@@ -89,6 +89,12 @@ Module.register("MMM-phase6", {
 		table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
 		for (const profile of this.profiles) {
 			const row = this.getRow("td", [profile.name, this.formatDate(profile.lastLearned), String(profile.due), String(profile.streak)]);
+			// A calendar icon after the streak, in its color, so that it reads
+			// as days and not as more vocabulary. fa-xs makes it as high as the
+			// digits.
+			const icon = document.createElement("i");
+			icon.className = "fa-regular fa-calendar-check fa-xs";
+			row.querySelector(".p6-streak").append(icon);
 			// The name and the due vocabulary bright while vocabulary is due,
 			// unless they are stale; otherwise they have the color of the table
 			if (profile.due > 0 && !stale) {

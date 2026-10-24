@@ -19,6 +19,13 @@
   text-align: right;
 }
 
+/* The calendar icon after the streak as far from it as the icon of a
+   problem from its text: 0.3em of the text, as fa-xs makes the icon 0.75em
+   high */
+.MMM-phase6 .p6-profiles .p6-streak i {
+  margin-left: 0.4em;
+}
+
 /* The headers of the columns in capitals like the header of a module, and
    not bold like other th */
 .MMM-phase6 .p6-profiles th {

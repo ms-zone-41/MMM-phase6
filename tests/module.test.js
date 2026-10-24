@@ -184,6 +184,15 @@ test("gives the cells of each column the same class, also the header", () => {
 	]);
 });
 
+test("shows a calendar icon after each streak, as high as the digits and in the color of the streak, so that it reads as days", () => {
+	const dom = receive(createModule(), [EMMA, NOAH]);
+	assert.deepEqual(Array.from(dom.querySelectorAll(".p6-streak"), (cell) => Array.from(cell.childNodes, (node) => (node.tagName ? `${node.tagName} ${node.className}` : node.textContent))), [
+		["Streak"],
+		["28", "I fa-regular fa-calendar-check fa-xs"],
+		["3", "I fa-regular fa-calendar-check fa-xs"]
+	]);
+});
+
 test("shows a problem without a table if no update has worked yet", () => {
 	const dom = receive(createModule("de"), null, { code: "LOGIN_FAILED" });
 	assert.equal(warning(dom), "phase6 hat den Login abgelehnt: Login auf phase-6.de prüfen, dann MagicMirror² neu starten");
