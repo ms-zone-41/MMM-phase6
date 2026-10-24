@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A calendar icon after the streak, so that it reads as days and not as more due words
+- `showColumnHeaders: false` hides the column headers, e.g. Zuletzt, Fällig and Serie: the calendar icon after the streak tells it apart from the due words. The default, `true`, shows them
 
 ## 2.1.0 - 2026-10-23
 

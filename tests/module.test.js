@@ -57,12 +57,13 @@ const EMMA = { name: "Emma", lastLearned: new Date(2026, 9, 10, 15, 25).getTime(
 const NOAH = { name: "Noah", lastLearned: new Date(2026, 9, 9, 7, 9).getTime(), due: 0, streak: 3 };
 
 // Start the module in a mirror with the given language, locale and
-// timeFormat, with stand-ins for the methods of MagicMirror²
-function createModule(language = "en", locale = undefined, timeFormat = 24) {
+// timeFormat, and with the given options of the module, with stand-ins for
+// the methods of MagicMirror²
+function createModule(language = "en", locale = undefined, timeFormat = 24, options = {}) {
 	Object.assign(globalConfig, { language, locale, timeFormat });
 	const module = Object.assign(Object.create(definition), {
 		name: "MMM-phase6",
-		config: { ...definition.defaults },
+		config: { ...definition.defaults, ...options },
 		socketNotifications: [],
 		// Like MagicMirror², fill in variables such as {name}
 		translate(key, variables = {}) {
@@ -130,6 +131,15 @@ test("shows the profiles in a table, in the language of the mirror", () => {
 		["Emma", "Heute", "29", "28"],
 		["Noah", "Gestern", "0", "3"]
 	]);
+});
+
+test("shows the profiles without the headers of the columns if showColumnHeaders is false", () => {
+	const dom = receive(createModule("de", undefined, 24, { showColumnHeaders: false }), [EMMA, NOAH]);
+	assert.deepEqual(rows(dom), [
+		["Emma", "Heute", "29", "28"],
+		["Noah", "Gestern", "0", "3"]
+	]);
+	assert.equal(dom.querySelector("th"), null);
 });
 
 test("shows the date of earlier days, with the year only for another year", () => {

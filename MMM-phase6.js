@@ -9,9 +9,11 @@
 
 Module.register("MMM-phase6", {
 
-	// The module has no options for the display: the node helper reads all
-	// options from config.js and sends what the module shows.
-	defaults: {},
+	// The options for the display. The node helper reads all other options
+	// from config.js and sends what the module shows.
+	defaults: {
+		showColumnHeaders: true
+	},
 
 	// The node helper reads its options with getServerModuleConfig()
 	requiresVersion: "2.38.0",
@@ -75,9 +77,9 @@ Module.register("MMM-phase6", {
 		return wrapper;
 	},
 
-	// A row for each profile, below a row with the headers of the columns. The
-	// th and the td of each column have the same class, so that custom.css can
-	// hide a column.
+	// A row for each profile, below a row with the headers of the columns
+	// unless showColumnHeaders is false. The th and the td of each column have
+	// the same class, so that custom.css can hide a column.
 	getTable() {
 		const table = document.createElement("table");
 		// While the problem lasts, the profiles are those of the last update
@@ -86,7 +88,9 @@ Module.register("MMM-phase6", {
 		// that matches no profile comes with the profiles of this update.
 		const stale = Boolean(this.error) && this.error.code !== "UNKNOWN_PROFILE";
 		table.className = stale ? "p6-profiles p6-stale dimmed" : "p6-profiles";
-		table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
+		if (this.config.showColumnHeaders) {
+			table.append(this.getRow("th", ["", this.translate("LAST_LEARNED"), this.translate("DUE"), this.translate("STREAK")]));
+		}
 		for (const profile of this.profiles) {
 			const row = this.getRow("td", [profile.name, this.formatDate(profile.lastLearned), String(profile.due), String(profile.streak)]);
 			// A calendar icon after the streak, in its color, so that it reads

@@ -59,6 +59,7 @@ In the password, write `$$` for each `$`. A password with `"` or `\` does not wo
 | `due` | The due words to show: `"all"` for all words that are due, or `"today"` for those that phase6 asks for today, at most the daily limit (Tägliches Abfragelimit) of each vocabulary collection, as the phase6 app shows them under Heute. | `"all"` |
 | `dueAdjustments` | A number to add to the due words of a profile, by its name as in `profiles`, e.g. `{ Emma: -1 }` if phase6 counts a word as due that cannot be learned. | `{}` |
 | `updateInterval` | The time between two updates, in milliseconds, at least one minute. | `10 * 60 * 1000` (10 minutes) |
+| `showColumnHeaders` | Whether to show the headers of the columns, e.g. Last learned, Due and Streak. Without them, the calendar icon after the streak tells it apart from the due words. | `true` |
 
 To hide a column, add a rule to `config/custom.css`, e.g. `.MMM-phase6 .p6-streak { display: none; }` for the streak. The other columns are `p6-last` and `p6-due`. While the profiles are dimmed, see [Messages](#messages), the table has the class `p6-stale`.
 
