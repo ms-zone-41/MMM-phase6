@@ -97,7 +97,7 @@ Module.register("MMM-phase6", {
 			// as days and not as more vocabulary. fa-xs makes it as high as the
 			// digits.
 			const icon = document.createElement("i");
-			icon.className = "fa-regular fa-calendar-check fa-xs";
+			icon.className = "fa-regular fa-calendar-days fa-xs";
 			row.querySelector(".p6-streak").append(icon);
 			// The name and the due vocabulary bright while vocabulary is due,
 			// unless they are stale; otherwise they have the color of the table

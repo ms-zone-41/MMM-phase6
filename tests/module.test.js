@@ -198,8 +198,8 @@ test("shows a calendar icon after each streak, as high as the digits and in the 
 	const dom = receive(createModule(), [EMMA, NOAH]);
 	assert.deepEqual(Array.from(dom.querySelectorAll(".p6-streak"), (cell) => Array.from(cell.childNodes, (node) => (node.tagName ? `${node.tagName} ${node.className}` : node.textContent))), [
 		["Streak"],
-		["28", "I fa-regular fa-calendar-check fa-xs"],
-		["3", "I fa-regular fa-calendar-check fa-xs"]
+		["28", "I fa-regular fa-calendar-days fa-xs"],
+		["3", "I fa-regular fa-calendar-days fa-xs"]
 	]);
 });
 
